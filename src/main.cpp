@@ -131,11 +131,12 @@ static void UpdateAndRender() {
 	UI_Box* root = UI_MakeRootBox(UI_KEY(), g_window_size.x, g_window_size.y, 0);
 	UI_PushBox(root);
 	UI_AddBoxWithText(UI_KEY(), UI_SizeFit(), UI_SizeFit(), 0, STR_("This will become a plant generator!"));
-	
+
 	UI_AddFmt(UI_KEY(), "Points per meter: %!f", &g_plant_params.points_per_meter);
 	UI_AddFmt(UI_KEY(), "Age: %!f", &g_plant_params.age);
 	UI_AddFmt(UI_KEY(), "Pitch twist: %!f", &g_plant_params.pitch_twist);
 	UI_AddFmt(UI_KEY(), "Yaw twist: %!f", &g_plant_params.yaw_twist);
+	UI_AddFmt(UI_KEY(), "Drop pitch: %!f", &g_plant_params.drop_pitch);
 
 	UI_AddButton(UI_KEY(), UI_SizeFit(), UI_SizeFit(), 0, STR_("Hello!"));
 	UI_PopBox(root);

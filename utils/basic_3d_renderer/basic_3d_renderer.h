@@ -278,14 +278,23 @@ static void B3R_Init(ID3D11Device* device) {
 	{
 		ID3DBlob* wire_vs_blob;
 		D3DCompile(B3R_WIRE_SHADER_SRC, sizeof(B3R_WIRE_SHADER_SRC)-1, "VS", NULL, NULL, "VSMain", "vs_5_0", 0, 0, &wire_vs_blob, &errors);
-		if (wire_vs_blob == NULL) { char* errs = (char*)errors->GetBufferPointer(); __debugbreak(); }
+		if (wire_vs_blob == NULL) {
+			char* errs = (char*)errors->GetBufferPointer();
+			assert(0);
+		}
 
 		ID3DBlob* wire_ps_blob;
 		D3DCompile(B3R_WIRE_SHADER_SRC, sizeof(B3R_WIRE_SHADER_SRC)-1, "PS", NULL, NULL, "PSMain", "ps_5_0", 0, 0, &wire_ps_blob, &errors);
-		if (wire_ps_blob == NULL) { char* errs = (char*)errors->GetBufferPointer(); __debugbreak(); }
+		if (wire_ps_blob == NULL) {
+			char* errs = (char*)errors->GetBufferPointer();
+			assert(0);
+		}
 
 		device->CreateVertexShader(wire_vs_blob->GetBufferPointer(), wire_vs_blob->GetBufferSize(), NULL, &B3R_STATE.wire_vs);
 		device->CreatePixelShader(wire_ps_blob->GetBufferPointer(), wire_ps_blob->GetBufferSize(), NULL, &B3R_STATE.wire_ps);
+		
+		wire_vs_blob->Release();
+		wire_ps_blob->Release();
 	}
 
 	for (int i = 0; i < B3R_VertexLayout_COUNT; i++) {
@@ -297,7 +306,10 @@ static void B3R_Init(ID3D11Device* device) {
 		}
 
 		D3DCompile(B3R_SHADER_SRC, sizeof(B3R_SHADER_SRC) - 1, "VS", macros, NULL, "VSMain", "vs_5_0", 0, 0, &vs_blob, &errors);
-		if (vs_blob == NULL) { char* errs = (char*)errors->GetBufferPointer(); __debugbreak(); }
+		if (vs_blob == NULL) {
+			char* errs = (char*)errors->GetBufferPointer();
+			assert(0);
+		}
 
 		device->CreateVertexShader(vs_blob->GetBufferPointer(), vs_blob->GetBufferSize(), NULL, &B3R_STATE.vertex_shaders[i]);
 		
@@ -332,6 +344,9 @@ static void B3R_Init(ID3D11Device* device) {
 		
 		B3R_STATE.vertex_layout_vertex_sizes[i] = vertex_size;
 		device->CreateInputLayout(input_elems, input_elems_count, vs_blob->GetBufferPointer(), vs_blob->GetBufferSize(), &B3R_STATE.vertex_layouts[i]);
+
+		vs_blob->Release();
+		ps_blob->Release();
 	}
 
 	///////////////////////////////////////////////////////////////////////////////////////////////
@@ -378,6 +393,20 @@ static void B3R_Init(ID3D11Device* device) {
 	D3D11_BLEND_DESC blend_state_desc = {0};
 	blend_state_desc.RenderTarget[0] = blend_desc;
 	device->CreateBlendState(&blend_state_desc, &B3R_STATE.blend_state);
+}
+
+static void B3R_Deinit(void) {
+	B3R_STATE.blend_state->Release();
+	B3R_STATE.sampler_state->Release();
+	B3R_STATE.wireframe_raster_state->Release();
+	B3R_STATE.raster_state->Release();
+	B3R_STATE.constant_buffer->Release();
+
+	for (int i = 0; i < B3R_VertexLayout_COUNT; i++) {
+		B3R_STATE.vertex_layouts[i]->Release();
+		B3R_STATE.pixel_shaders[i]->Release();
+		B3R_STATE.vertex_shaders[i]->Release();
+	}
 }
 
 static void B3R_WireMeshInit(B3R_WireMesh* mesh, const B3R_WireVertex* vertices, int num_vertices) {

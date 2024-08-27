@@ -2,10 +2,12 @@
 struct StemPoint {
 	HMM_Vec3 point;
 	float thickness;
+	HMM_Quat rotation; // +Z is up
 };
 
 struct Stem {
 	DS_DynArray(StemPoint) points;
+	float end_leaf_expand; // 0 if the end is a bud, between 0 and 1 means a ratio of how grown a leaf is
 };
 
 struct Plant {
@@ -22,7 +24,7 @@ struct PlantParameters {
 	//float pitch_rotate
 };
 
-static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, float age, const PlantParameters* params) {
+static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, float age, float thickness, const PlantParameters* params) {
 	Stem stem{};
 	DS_ArrInit(&stem.points, plant->arena);
 
@@ -79,13 +81,13 @@ static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, f
 			float end_point_reached_this_point_at_approx_age = age * end_point_t / desired_length;
 			float new_stem_age = age - end_point_reached_this_point_at_approx_age;
 			if (new_stem_age > 0.f) {
-				AddStem(plant, end_point, new_stem_rot, new_stem_age * 0.5f, params);
+				AddStem(plant, end_point, new_stem_rot, new_stem_age * 0.5f, thickness * 0.5f, params);
 				
 				end_point_drop_yaw += golden_ratio_rad_increment;
 			}
 		}
 
-		DS_ArrPush(&stem.points, {end_point, 0.1f});
+		DS_ArrPush(&stem.points, {end_point, thickness, end_rotation});
 
 		HMM_Quat pitch_step_rotator = HMM_QFromAxisAngle_RH({1.f, 0.f, 0.f}, HMM_AngleDeg(params->pitch_twist) * step_size);
 		HMM_Quat yaw_step_rotator = HMM_QFromAxisAngle_RH({0.f, 0.f, 1.f}, HMM_AngleDeg(params->yaw_twist) * step_size);
@@ -106,7 +108,7 @@ static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, f
 		distance_since_last_bud += step_size;
 
 		if (is_last) {
-			DS_ArrPush(&stem.points, {end_point, 0.1f});
+			DS_ArrPush(&stem.points, {end_point, thickness, end_rotation});
 			break;
 		}
 	}
@@ -120,7 +122,7 @@ static Plant GeneratePlant(DS_Arena* arena, const PlantParameters* params) {
 	DS_ArrInit(&plant.stems, arena);
 
 	float desired_length = params->age;
-	AddStem(&plant, {0, 0, 0}, {0, 0, 0, 1}, desired_length, params);
+	AddStem(&plant, {0, 0, 0}, {0, 0, 0, 1}, desired_length, 0.02f, params);
 
 	return plant;
 }

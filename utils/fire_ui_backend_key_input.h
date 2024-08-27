@@ -41,7 +41,7 @@ static void UI_Input_ApplyInputs(UI_Inputs* ui_inputs, Input_Frame* inputs) {
 			}
 			if (ui_input) {
 				if (event->kind == Input_EventKind_Press) {
-					ui_inputs->input_events[ui_input] |= UI_InputEvent_Press;
+					ui_inputs->input_events[ui_input] |= UI_InputEvent_Press | UI_InputEvent_PressOrRepeat;
 				} else if (event->kind == Input_EventKind_Repeat) {
 					ui_inputs->input_events[ui_input] |= UI_InputEvent_PressOrRepeat;
 				} else {

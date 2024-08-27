@@ -1,10 +1,10 @@
 
-typedef struct Input_OS_State {
+typedef struct Input_OS_Events {
 	Input_Frame* frame;
 	DS_DynArray(Input_Event) events;
-} Input_OS_State;
+} Input_OS_Events;
 
-static void Input_OS_BeginEvents(Input_OS_State* state, Input_Frame* frame, DS_Arena* frame_arena) {
+static void Input_OS_BeginEvents(Input_OS_Events* state, Input_Frame* frame, DS_Arena* frame_arena) {
 	memset(state, 0, sizeof(*state));
 	state->frame = frame;
 	state->frame->mouse_wheel_input[0] = 0.f;
@@ -14,12 +14,12 @@ static void Input_OS_BeginEvents(Input_OS_State* state, Input_Frame* frame, DS_A
 	DS_ArrInit(&state->events, frame_arena);
 }
 
-static void Input_OS_EndEvents(Input_OS_State* state) {
+static void Input_OS_EndEvents(Input_OS_Events* state) {
 	state->frame->events = state->events.data;
 	state->frame->events_count = state->events.length;
 }
 
-static void Input_OS_AddEvent(Input_OS_State* state, const OS_WINDOW_Event* event) {
+static void Input_OS_AddEvent(Input_OS_Events* state, const OS_WINDOW_Event* event) {
 	if (event->kind == OS_WINDOW_EventKind_Press) {
 		Input_Key key = (Input_Key)event->key; // NOTE: OS_Key and Input_Key must be kept in sync!
 		state->frame->key_is_down[event->key] = true;

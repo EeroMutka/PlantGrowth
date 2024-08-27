@@ -335,12 +335,12 @@ typedef enum UI_MouseCursor {
 	UI_MouseCursor_ResizeH,
 	UI_MouseCursor_ResizeV,
 	UI_MouseCursor_I_beam,
+	UI_MouseCursor_LockAndHide,
 } UI_MouseCursor;
 
 typedef struct UI_Outputs {
 	UI_MouseCursor cursor;
-	bool lock_and_hide_cursor;
-
+	
 	UI_DrawCall* draw_calls;
 	int draw_calls_count;
 
@@ -1102,7 +1102,7 @@ UI_API UI_Box* UI_AddValNumeric(UI_Key key, UI_Size w, UI_Size h, void* value_64
 			UI_BoxFlag_Clickable | UI_BoxFlag_Selectable | UI_BoxFlag_DrawBorder | UI_BoxFlag_PressingStaysWithoutHover, value_str);
 
 		if (UI_Pressed(box->key)) {
-			UI_STATE.outputs.lock_and_hide_cursor = true;
+			UI_STATE.outputs.cursor = UI_MouseCursor_LockAndHide;
 			
 			if (is_float) {
 				UI_STATE.edit_number_value_before_press = *(double*)value_64_bit;
@@ -1118,8 +1118,8 @@ UI_API UI_Box* UI_AddValNumeric(UI_Key key, UI_Size w, UI_Size h, void* value_64
 		}
 
 		if (dragging) {
-			UI_STATE.outputs.lock_and_hide_cursor = true;
-
+			UI_STATE.outputs.cursor = UI_MouseCursor_LockAndHide;
+			
 			double new_value = UI_STATE.edit_number_value_before_press + UI_STATE.mouse_travel_distance_after_press.x * 0.05f;
 
 			if (is_float) {

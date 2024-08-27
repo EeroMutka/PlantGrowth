@@ -1,54 +1,15 @@
-// camera.h - Eero Mutka, 2023
-// 
-// * Depends on `fire.h` and `HandmadeMath.h`
-// * Assumes a right-handed coordinate system.
-// 
-// USAGE:
-// 1. Include this file
-// 2. Make a zero-initialized Camera
-// 3. on update, call `Camera_Update()`
-// 4. take the cached `world_to_projection` matrix from the camera
-//
 
-typedef struct Camera {
+struct Camera {
 	HMM_Vec3 pos;
 	HMM_Quat ori;
-
+	
 	HMM_Vec3 lazy_pos;
 	HMM_Quat lazy_ori;
 
 	float aspect_ratio, z_near, z_far;
 
-	// The following are cached in `Camera_Update`, do not set by hand
-	HMM_Mat4 clip_from_world;
-	HMM_Mat4 clip_from_view;
-	HMM_Mat4 view_from_world;
-	HMM_Mat4 view_from_clip;
-	HMM_Mat4 world_from_view;
-	HMM_Mat4 world_from_clip;
-} Camera;
-
-static HMM_Vec3 Camera_Right(const Camera* camera) { return camera->world_from_view.Columns[0].XYZ; }
-
-// The world & camera coordinates are always right handed. It's either +Y is down +Z forward, or +Y up +Z back
-#ifdef CAMERA_VIEW_SPACE_IS_POSITIVE_Y_DOWN
-static HMM_Vec3 Camera_Up(const Camera* camera)        { return HMM_MulV3F(camera->world_from_view.Columns[1].XYZ, -1.f); }
-static HMM_Vec3 Camera_Down(const Camera* camera)      { return camera->world_from_view.Columns[1].XYZ; }
-static HMM_Vec3 Camera_Forward(const Camera* camera)   { return camera->world_from_view.Columns[2].XYZ; }
-#else
-static HMM_Vec3 Camera_Up(const Camera* camera)        { return camera->world_from_view.Columns[1].XYZ; }
-static HMM_Vec3 Camera_Down(const Camera* camera)      { return HMM_MulV3F(camera->world_from_view.Columns[1].XYZ, -1.f); }
-static HMM_Vec3 Camera_Forward(const Camera* camera)   { return HMM_MulV3F(camera->world_from_view.Columns[2].XYZ, -1.f); }
-#endif
-
-static HMM_Vec3 Camera_RotateV3(HMM_Quat q, HMM_Vec3 v) {
-	// from https://stackoverflow.com/questions/44705398/about-glm-quaternion-rotation
-	HMM_Vec3 a = HMM_MulV3F(v, q.W);
-	HMM_Vec3 b = HMM_Cross(q.XYZ, v);
-	HMM_Vec3 c = HMM_AddV3(b, a);
-	HMM_Vec3 d = HMM_Cross(q.XYZ, c);
-	return HMM_AddV3(v, HMM_MulV3F(d, 2.f));
-}
+	HMM_PerspectiveCamera cached; // Cached in `Camera_Update`
+};
 
 static void Camera_Update(Camera* camera, Input_Frame* inputs, float movement_speed, float mouse_speed,
 	float FOV, float aspect_ratio_x_over_y, float z_near, float z_far)
@@ -74,7 +35,7 @@ static void Camera_Update(Camera* camera, Input_Frame* inputs, float movement_sp
 		float pitch_delta = -mouse_speed * (float)inputs->raw_mouse_input[1];
 
 		// So for this, we need to figure out the "right" axis of the camera.
-		HMM_Vec3 cam_right_old = Camera_RotateV3(camera->ori, HMM_V3(1, 0, 0));
+		HMM_Vec3 cam_right_old = HMM_RotateV3(HMM_V3(1, 0, 0), camera->ori);
 		HMM_Quat pitch_rotator = HMM_QFromAxisAngle_RH(cam_right_old, pitch_delta);
 		camera->ori = HMM_MulQ(pitch_rotator, camera->ori);
 
@@ -92,28 +53,22 @@ static void Camera_Update(Camera* camera, Input_Frame* inputs, float movement_sp
 			movement_speed *= 0.1f;
 		}
 		if (Input_IsDown(inputs, Input_Key_W)) {
-			camera->pos = HMM_AddV3(camera->pos,
-				HMM_MulV3F(Camera_Forward(camera), movement_speed));
+			camera->pos += camera->cached.forward_dir * movement_speed;
 		}
 		if (Input_IsDown(inputs, Input_Key_S)) {
-			camera->pos = HMM_AddV3(camera->pos,
-				HMM_MulV3F(Camera_Forward(camera), -movement_speed));
+			camera->pos += camera->cached.forward_dir * -movement_speed;
 		}
 		if (Input_IsDown(inputs, Input_Key_D)) {
-			camera->pos = HMM_AddV3(camera->pos,
-				HMM_MulV3F(Camera_Right(camera), movement_speed));
+			camera->pos += camera->cached.right_dir * movement_speed;
 		}
 		if (Input_IsDown(inputs, Input_Key_A)) {
-			camera->pos = HMM_AddV3(camera->pos,
-				HMM_MulV3F(Camera_Right(camera), -movement_speed));
+			camera->pos += camera->cached.right_dir * -movement_speed;
 		}
 		if (Input_IsDown(inputs, Input_Key_E)) {
-			camera->pos = HMM_AddV3(camera->pos,
-				HMM_V3(0, 0, movement_speed));
+			camera->pos += HMM_V3(0, 0, movement_speed);
 		}
 		if (Input_IsDown(inputs, Input_Key_Q)) {
-			camera->pos = HMM_AddV3(camera->pos,
-				HMM_V3(0, 0, -movement_speed));
+			camera->pos += HMM_V3(0, 0, -movement_speed);
 		}
 	}
 
@@ -127,24 +82,32 @@ static void Camera_Update(Camera* camera, Input_Frame* inputs, float movement_sp
 	camera->z_near = z_near;
 	camera->z_far = z_far;
 
-#if 1
-	camera->world_from_view = HMM_MulM4(HMM_Translate(camera->lazy_pos), HMM_QToM4(camera->lazy_ori));
-#else
-	camera->world_from_view = HMM_MulM4(HMM_Translate(camera->pos), HMM_QToM4(camera->ori));
-#endif
-	camera->view_from_world = HMM_InvGeneralM4(camera->world_from_view);//HMM_QToM4(HMM_InvQ(camera->ori)) * HMM_Translate(-1.f * camera->pos);
+	HMM_Mat4 world_from_view = HMM_MulM4(HMM_Translate(camera->lazy_pos), HMM_QToM4(camera->lazy_ori));
+	HMM_Mat4 view_from_world = HMM_InvGeneralM4(world_from_view);//HMM_QToM4(HMM_InvQ(camera->ori)) * HMM_Translate(-1.f * camera->pos);
 	
 	// "_RH_ZO" means "right handed, zero-to-one NDC z range"
 #ifdef CAMERA_VIEW_SPACE_IS_POSITIVE_Y_DOWN
 	// Somewhat counter-intuitively, the HMM_Perspective_LH_ZO function is the true right-handed perspective function. RH_ZO requires a Z flip, RH_NO doesn't, and LH_ZO doesn't either.
-	camera->clip_from_view = HMM_Perspective_LH_ZO(HMM_AngleDeg(FOV), camera->aspect_ratio, camera->z_near, camera->z_far);
+	HMM_Mat4 clip_from_view = HMM_Perspective_LH_ZO(HMM_AngleDeg(FOV), camera->aspect_ratio, camera->z_near, camera->z_far);
 #else
-	camera->clip_from_view = HMM_Perspective_RH_ZO(HMM_AngleDeg(FOV), camera->aspect_ratio, camera->z_near, camera->z_far);
+	HMM_Mat4 clip_from_view = HMM_Perspective_RH_ZO(HMM_AngleDeg(FOV), camera->aspect_ratio, camera->z_near, camera->z_far);
 #endif
 
-	camera->view_from_clip = HMM_InvGeneralM4(camera->clip_from_view);
-		//HMM_InvPerspective_RH(camera->view_to_clip);
+	HMM_Mat4 view_from_clip = HMM_InvGeneralM4(clip_from_view);
 	
-	camera->clip_from_world = HMM_MulM4(camera->clip_from_view, camera->view_from_world);
-	camera->world_from_clip = HMM_InvGeneralM4(camera->clip_from_world);//camera->view_to_world * camera->clip_to_view;
+	HMM_Mat4 clip_from_world = HMM_MulM4(clip_from_view, view_from_world);
+	HMM_Mat4 world_from_clip = HMM_InvGeneralM4(clip_from_world); //camera->view_to_world * camera->clip_to_view;
+
+	camera->cached.clip_from_world = clip_from_world;
+	camera->cached.world_from_clip = world_from_clip;
+	camera->cached.position = camera->lazy_pos;
+	#ifdef CAMERA_VIEW_SPACE_IS_POSITIVE_Y_DOWN
+	camera->cached.right_dir = world_from_view.Columns[0].XYZ;
+	camera->cached.up_dir = world_from_view.Columns[1].XYZ * -1.f;
+	camera->cached.forward_dir = world_from_view.Columns[2].XYZ;
+	#else
+	camera->cached.right_dir = world_from_view.Columns[0].XYZ;
+	camera->cached.up_dir = world_from_view.Columns[1].XYZ;
+	camera->cached.forward_dir = world_from_view.Columns[2].XYZ * -1.f;
+	#endif
 }

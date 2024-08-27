@@ -24,7 +24,7 @@ typedef HMM_Vec4 HMM_Plane;
 // if from = -to, then fallback_axis will be used as the axis of rotation.
 static HMM_Quat HMM_ShortestRotationBetweenUnitVectors(HMM_Vec3 from, HMM_Vec3 to, HMM_Vec3 fallback_axis);
 
-static HMM_Vec3 HMM_RotateV3(HMM_Vec3 v, HMM_Quat q);
+static HMM_Vec3 HMM_RotateV3(HMM_Vec3 vector, HMM_Quat rotator);
 
 static HMM_Plane HMM_PlaneFromPointAndNormal(HMM_Vec3 plane_p, HMM_Vec3 plane_n);
 static HMM_Plane HMM_FlipPlane(HMM_Plane plane);
@@ -176,13 +176,13 @@ static HMM_Vec3 HMM_ProjectPointOntoPlane(HMM_Vec3 p, HMM_Vec3 plane_p, HMM_Vec3
 	return HMM_AddV3(plane_p, p_rel);
 }
 
-static HMM_Vec3 HMM_RotateV3(HMM_Vec3 v, HMM_Quat q) {
+static HMM_Vec3 HMM_RotateV3(HMM_Vec3 vector, HMM_Quat rotator) {
 	// from https://stackoverflow.com/questions/44705398/about-glm-quaternion-rotation
-	HMM_Vec3 a = HMM_MulV3F(v, q.W);
-	HMM_Vec3 b = HMM_Cross(q.XYZ, v);
+	HMM_Vec3 a = HMM_MulV3F(vector, rotator.W);
+	HMM_Vec3 b = HMM_Cross(rotator.XYZ, vector);
 	HMM_Vec3 c = HMM_AddV3(b, a);
-	HMM_Vec3 d = HMM_Cross(q.XYZ, c);
-	return HMM_AddV3(v, HMM_MulV3F(d, 2.f));
+	HMM_Vec3 d = HMM_Cross(rotator.XYZ, c);
+	return HMM_AddV3(vector, HMM_MulV3F(d, 2.f));
 }
 
 static float HMM_SignedDistanceToPlane(HMM_Vec3 p, HMM_Plane plane) {

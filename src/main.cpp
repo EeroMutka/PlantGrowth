@@ -39,6 +39,17 @@
 #include "../Fire/fire_ui/fire_ui_backend_dx11.h"
 #include "../Fire/fire_ui/fire_ui_backend_fire_os.h"
 
+#include "third_party/HandmadeMath.h"
+#include "utils/space_math.h"
+#include "utils/basic_3d_renderer/basic_3d_renderer.h"
+#include "utils/gizmos.h"
+#include "utils/key_input/key_input.h"
+#include "utils/key_input/key_input_fire_os.h"
+#include "utils/fire_ui_backend_key_input.h"
+
+#define CAMERA_VIEW_SPACE_IS_POSITIVE_Y_DOWN
+#include "utils/camera.h"
+
 //// Globals ///////////////////////////////////////////////
 
 static UI_Vec2 g_window_size = {1200, 900};
@@ -47,7 +58,12 @@ static OS_WINDOW g_window;
 static IDXGISwapChain* g_swapchain;
 static ID3D11RenderTargetView* g_framebuffer_rtv;
 
-static UI_Inputs g_ui_inputs;
+static UI_Font g_base_font, g_icons_font;
+
+static Input_Frame g_inputs;
+static DS_Arena g_temp;
+
+static Camera g_camera;
 
 ////////////////////////////////////////////////////////////
 
@@ -68,8 +84,22 @@ static STR ReadEntireFile(DS_Arena* arena, const char* file) {
 }
 
 static void UpdateAndRender() {
+	DS_ArenaReset(&g_temp);
+
+	Camera_Update(&g_camera, &g_inputs, 0.01f, 0.001f, 70.f, g_window_size.x / g_window_size.y, 0.01f, 1000.f);
+
+	GizmosViewport vp = {0};
+	vp.camera = g_camera.cached;
+	vp.window_size = {g_window_size.x, g_window_size.y};
+	vp.window_size_inv = {1.f/g_window_size.x, 1.f/g_window_size.y};
+
+	UI_Inputs ui_inputs{};
+	UI_Input_ApplyInputs(&ui_inputs, &g_inputs);
+	ui_inputs.base_font = &g_base_font;
+	ui_inputs.icons_font = &g_icons_font;
+
 	UI_DX11_BeginFrame();
-	UI_BeginFrame(&g_ui_inputs, g_window_size);
+	UI_BeginFrame(&ui_inputs, g_window_size);
 
 	UI_Box* root = UI_MakeRootBox(UI_KEY(), g_window_size.x, g_window_size.y, 0);
 	UI_PushBox(root);
@@ -79,6 +109,10 @@ static void UpdateAndRender() {
 	UI_BoxComputeRects(root, {0, 0});
 	UI_DrawBox(root);
 
+	DrawArrow3D(&vp, {0, 0, 0}, {1, 0, 0}, 0.05f, 0.02f, 8, 5.f, UI_RED);
+	DrawArrow3D(&vp, {0, 0, 0}, {0, 1, 0}, 0.05f, 0.02f, 8, 5.f, UI_GREEN);
+	DrawArrow3D(&vp, {0, 0, 0}, {0, 0, 1}, 0.05f, 0.02f, 8, 5.f, UI_BLUE);
+
 	UI_Outputs ui_outputs;
 	UI_EndFrame(&ui_outputs);
 	
@@ -86,7 +120,7 @@ static void UpdateAndRender() {
 	UI_DX11_STATE.device_context->ClearRenderTargetView(g_framebuffer_rtv, clearcolor);
 
 	UI_DX11_EndFrame(&ui_outputs, g_framebuffer_rtv);
-	UI_OS_ApplyOutputs(&g_window, &ui_outputs);
+	UI_OS_ApplyMouseControl(&g_window, ui_outputs.cursor);
 	
 	g_swapchain->Present(1, 0);
 }
@@ -100,7 +134,7 @@ static void OnResizeWindow(uint32_t width, uint32_t height, void *user_ptr) {
 	g_framebuffer_rtv->Release();
 
 	g_swapchain->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
-	
+
 	ID3D11Texture2D* framebuffer;
 	g_swapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&framebuffer); // grab framebuffer from swapchain
 
@@ -108,7 +142,7 @@ static void OnResizeWindow(uint32_t width, uint32_t height, void *user_ptr) {
 	framebuffer_rtv_desc.Format        = DXGI_FORMAT_B8G8R8A8_UNORM;
 	framebuffer_rtv_desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DMS;
 	UI_DX11_STATE.device->CreateRenderTargetView(framebuffer, &framebuffer_rtv_desc, &g_framebuffer_rtv);
-	
+
 	framebuffer->Release(); // We don't need this handle anymore
 
 	UpdateAndRender();
@@ -117,6 +151,7 @@ static void OnResizeWindow(uint32_t width, uint32_t height, void *user_ptr) {
 int main() {
 	DS_Arena persist;
 	DS_ArenaInit(&persist, 4096, DS_HEAP);
+	DS_ArenaInit(&g_temp, 4096, DS_HEAP);
 
 	g_window = OS_WINDOW_Create((uint32_t)g_window_size.x, (uint32_t)g_window_size.y, "UI demo (DX11)");
 
@@ -167,22 +202,24 @@ int main() {
 	STR roboto_mono_ttf = ReadEntireFile(&persist, "../fire/fire_ui/resources/roboto_mono.ttf");
 	STR icons_ttf = ReadEntireFile(&persist, "../fire/fire_ui/resources/fontello/font/fontello.ttf");
 
-	UI_Font base_font, icons_font;
-	UI_FontInit(&base_font, roboto_mono_ttf.data, -4.f);
-	UI_FontInit(&icons_font, icons_ttf.data, -2.f);
+	UI_FontInit(&g_base_font, roboto_mono_ttf.data, -4.f);
+	UI_FontInit(&g_icons_font, icons_ttf.data, -2.f);
 	
+	g_camera.pos.Y = -5.f;
+
 	while (!OS_WINDOW_ShouldClose(&g_window)) {
-		UI_OS_ResetFrameInputs(&g_window, &g_ui_inputs, &base_font, &icons_font);
-		
+		Input_OS_Events input_events;
+		Input_OS_BeginEvents(&input_events, &g_inputs, &g_temp);
 		for (OS_WINDOW_Event event; OS_WINDOW_PollEvent(&g_window, &event, OnResizeWindow, NULL);) {
-			UI_OS_RegisterInputEvent(&g_ui_inputs, &event);
+			Input_OS_AddEvent(&input_events, &event);
 		}
-		
+		Input_OS_EndEvents(&input_events);
+
 		UpdateAndRender();
 	}
 
-	UI_FontDeinit(&base_font);
-	UI_FontDeinit(&icons_font);
+	UI_FontDeinit(&g_base_font);
+	UI_FontDeinit(&g_icons_font);
 
 	UI_Deinit();
 	UI_DX11_Deinit();
@@ -193,4 +230,5 @@ int main() {
 	device_context->Release();
 
 	DS_ArenaDeinit(&persist);
+	DS_ArenaDeinit(&g_temp);
 }

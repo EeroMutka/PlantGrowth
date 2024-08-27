@@ -85,13 +85,14 @@ static void UI_OS_RegisterInputEvent(UI_Inputs* ui_inputs, const OS_WINDOW_Event
 	}
 }
 
-static void UI_OS_ApplyOutputs(OS_WINDOW* window, const UI_Outputs* outputs) {
-	OS_WINDOW_SetMouseCursorLockAndHide(window, outputs->lock_and_hide_cursor);
+static void UI_OS_ApplyMouseControl(OS_WINDOW* window, UI_MouseCursor cursor) {
+	OS_WINDOW_SetMouseCursorLockAndHide(window, cursor == UI_MouseCursor_LockAndHide);
 
-	switch (outputs->cursor) {
+	switch (cursor) {
 	case UI_MouseCursor_Default: OS_WINDOW_SetMouseCursor(window, OS_WINDOW_MouseCursor_Arrow); break;
 	case UI_MouseCursor_ResizeH: OS_WINDOW_SetMouseCursor(window, OS_WINDOW_MouseCursor_ResizeH); break;
 	case UI_MouseCursor_ResizeV: OS_WINDOW_SetMouseCursor(window, OS_WINDOW_MouseCursor_ResizeV); break;
 	case UI_MouseCursor_I_beam:  OS_WINDOW_SetMouseCursor(window, OS_WINDOW_MouseCursor_I_Beam); break;
+	case UI_MouseCursor_LockAndHide: break;
 	}
 }

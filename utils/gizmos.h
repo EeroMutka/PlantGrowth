@@ -9,12 +9,12 @@
 
 //static HMM_Mat4 AAAAA;
 
-typedef struct GizmosViewport {
+struct GizmosViewport {
 	HMM_PerspectiveCamera camera;
 	HMM_Vec2 window_size, window_size_inv;
-} GizmosViewport;
+};
 
-typedef enum TranslationAxis {
+enum TranslationAxis {
 	TranslationAxis_None,
 	TranslationAxis_X,
 	TranslationAxis_Y,
@@ -22,9 +22,9 @@ typedef enum TranslationAxis {
 	TranslationAxis_YZ, // perpendicular to X
 	TranslationAxis_ZX, // perpendicular to Y
 	TranslationAxis_XY, // perpendicular to Z
-} TranslationAxis;
+};
 
-typedef struct TranslationGizmo {
+struct TranslationGizmo {
 	TranslationAxis hovered_axis_;
 	TranslationAxis moving_axis_;
 	
@@ -47,11 +47,11 @@ typedef struct TranslationGizmo {
 	HMM_Vec2 planar_moving_begin_mouse_pos;
 	HMM_Vec2 planar_moving_begin_origin_screen;
 	HMM_Vec3 planar_moving_begin_translation;
-} TranslationGizmo;
+};
 
 #define ROTATION_GIZMO_POINTS_COUNT 28
 
-typedef struct RotationGizmo {
+struct RotationGizmo {
 	int hovered_axis; // 0 = none, 1 = x, 2 = y, 3 = z
 	int dragging_axis; // 0 = none, 1 = x, 2 = y, 3 = z
 
@@ -62,7 +62,7 @@ typedef struct RotationGizmo {
 
 	UI_Vec2 drag_start_mouse_pos;
 	HMM_Quat drag_start_rotation;
-} RotationGizmo;
+};
 
 GIZMOS_API void DrawPoint3D(const GizmosViewport* vp, HMM_Vec3 p, float thickness, UI_Color color);
 GIZMOS_API void DrawGrid3D(const GizmosViewport* vp, UI_Color color);
@@ -85,15 +85,13 @@ GIZMOS_API bool RotationGizmoShouldApply(const RotationGizmo* gizmo);
 GIZMOS_API void RotationGizmoUpdate(const GizmosViewport* vp, RotationGizmo* gizmo, HMM_Vec3 origin, HMM_Quat* rotation);
 GIZMOS_API void RotationGizmoDraw(const GizmosViewport* vp, const RotationGizmo* gizmo);
 
-
-typedef struct LineTranslation {
+struct LineTranslation {
 	HMM_Vec3 line_dir;
 	HMM_Vec2 moving_begin_mouse_pos;
 	HMM_Vec2 moving_begin_origin_screen;
 	HMM_Vec3 moving_begin_translation;
 	HMM_Vec3 moving_axis_arrow_end;
-} LineTranslation;
-
+};
 
 GIZMOS_API void LineTranslationBegin(LineTranslation* translation, const GizmosViewport* vp, HMM_Vec2 mouse_pos, HMM_Vec3 line_p, HMM_Vec3 line_dir);
 
@@ -412,13 +410,12 @@ GIZMOS_API void TranslationGizmoDraw(const GizmosViewport* vp, const Translation
 				UI_VEC2{gizmo->plane_gizmo_quads[i][2].X, gizmo->plane_gizmo_quads[i][2].Y},
 				UI_VEC2{gizmo->plane_gizmo_quads[i][3].X, gizmo->plane_gizmo_quads[i][3].Y},
 			};
-			UI_DrawQuad(q[0], q[1], q[2], q[3], inner_color, NULL);
+			UI_DrawQuad(q[0], q[1], q[2], q[3], inner_color);
 
-			UI_DrawLine(q[0], q[1], frame_width, frame_color, NULL);
-			UI_DrawLine(q[1], q[2], frame_width, frame_color, NULL);
-			UI_DrawLine(q[2], q[3], frame_width, frame_color, NULL);
-			UI_DrawLine(q[3], q[0], frame_width, frame_color, NULL);
-			
+			UI_DrawLine(q[0], q[1], frame_width, frame_color);
+			UI_DrawLine(q[1], q[2], frame_width, frame_color);
+			UI_DrawLine(q[2], q[3], frame_width, frame_color);
+			UI_DrawLine(q[3], q[0], frame_width, frame_color);
 		}
 	}
 }
@@ -550,9 +547,9 @@ GIZMOS_API void RotationGizmoDraw(const GizmosViewport* vp, const RotationGizmo*
 		for (int j = 0; j < ROTATION_GIZMO_POINTS_COUNT; j++) point_colors[j] = color;
 
 		if (gizmo->points_loop[i]) {
-			UI_DrawPolylineLoop(gizmo->points[i], point_colors, ROTATION_GIZMO_POINTS_COUNT, 3.f, NULL);
+			UI_DrawPolylineLoop(gizmo->points[i], point_colors, ROTATION_GIZMO_POINTS_COUNT, 3.f);
 		} else {
-			UI_DrawPolyline(gizmo->points[i], point_colors, ROTATION_GIZMO_POINTS_COUNT, 3.f, NULL);
+			UI_DrawPolyline(gizmo->points[i], point_colors, ROTATION_GIZMO_POINTS_COUNT, 3.f);
 		}
 	}
 }
@@ -582,7 +579,7 @@ GIZMOS_API void DrawLine3D(const GizmosViewport* vp, HMM_Vec3 a, HMM_Vec3 b, flo
 	if (in_front) {
 		HMM_Vec2 a_screen = HMM_CSToSS(a_clip, vp->window_size);
 		HMM_Vec2 b_screen = HMM_CSToSS(b_clip, vp->window_size);
-		UI_DrawLine(UI_VEC2{a_screen.X, a_screen.Y}, UI_VEC2{b_screen.X, b_screen.Y}, thickness, color, NULL);
+		UI_DrawLine(UI_VEC2{a_screen.X, a_screen.Y}, UI_VEC2{b_screen.X, b_screen.Y}, thickness, color);
 	}
 }
 
@@ -590,7 +587,7 @@ GIZMOS_API void DrawPoint3D(const GizmosViewport* vp, HMM_Vec3 p, float thicknes
 	HMM_Vec4 p_clip = HMM_MulM4V4(vp->camera.clip_from_world, HMM_V4V(p, 1.f));
 	if (p_clip.Z > 0.f) {
 		HMM_Vec2 p_screen = HMM_CSToSS(p_clip, vp->window_size);
-		UI_DrawPoint(UI_VEC2{p_screen.X, p_screen.Y}, thickness, color, NULL);
+		UI_DrawPoint(UI_VEC2{p_screen.X, p_screen.Y}, thickness, color);
 	}
 }
 

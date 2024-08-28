@@ -40,6 +40,7 @@ typedef struct B3R_WireMesh {
 
 typedef struct B3R_Texture {
 	ID3D11Texture2D* texture;
+	ID3D11ShaderResourceView* texture_view;
 } B3R_Texture;
 
 //typedef struct B3R_Material {
@@ -70,16 +71,24 @@ static void B3R_WireMeshDeinit(B3R_WireMesh* mesh);
 static void B3R_TextureInit(B3R_Texture* texture, int width, int height, void* data);
 static void B3R_TextureDeinit(B3R_Texture* texture);
 
+// -- Drawing context --------------------------------------------------------------------------------
+
 static void B3R_BeginDrawing(ID3D11DeviceContext* dc,
 	ID3D11RenderTargetView* framebuffer, ID3D11DepthStencilView* depthbuffer,
 	HMM_Mat4 clip_from_world, HMM_Vec3 camera_pos);
+
 static void B3R_EndDrawing(void);
+
+// By default, BeginDrawing binds a blank white texture. You can override the active texture with B3R_BindTexture.
+// - You may pass NULL into the `texture` to bind the blank texture back again
+static void B3R_BindTexture(B3R_Texture* texture);
+
 static void B3R_DrawMesh(const B3R_Mesh* mesh, B3R_DebugMode debug_mode);
 static void B3R_DrawWireMesh(const B3R_WireMesh* mesh,
 	float thickness, float fade_dist_min, float fade_dist_max,
 	float r, float g, float b, float a);
 
-// ** IMPLEMENTATION **
+// -- IMPLEMENTATION ---------------------------------------------------------------------------------
 
 typedef struct B3R_Constants {
 	HMM_Mat4 clip_from_world;
@@ -104,7 +113,8 @@ typedef struct B3R_State {
 	ID3D11BlendState* blend_state;
 	ID3D11SamplerState* sampler_state;
 	ID3D11Buffer* constant_buffer;
-	
+	B3R_Texture default_white_texture;
+
 	B3R_Constants constants;
 	ID3D11DeviceContext* dc; // only valid in between BeginDrawing and EndDrawing
 } B3R_State;
@@ -177,6 +187,8 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n		return lightness * lerp(1, 0.75, grid); // float3(0.9, 0.4, 0.3)  float3(0.8, 0.4, 0.3)
 \n	}
 \n	
+\n	Texture2D    color_texture : register(t0);
+\n	SamplerState default_sampler : register(s0);
 \n	
 \n	float4 PSMain(PixelData pixel) : SV_TARGET {
 \n	#if defined(B3R_VERT_LAYOUT_POSNORUVCOL)
@@ -202,10 +214,9 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n		}
 \n
 \n	#if defined(B3R_VERT_LAYOUT_POSNORUVCOL)
-\n		//float3 n = normalize(cross(pos_ddy, pos_ddx));
-\n		//return float4(n, 1);
-\n		float lightness = dot(n, normalize(float3(1, 1, 1)))*0.5 + 0.5;
-\n		return float4(lerp(0.5, 1., lightness) * pixel.color.xyz, 1);
+\n		return color_texture.Sample(default_sampler, pixel.uv) * pixel.color;
+\n		//float lightness = dot(n, normalize(float3(1, 1, 1)))*0.5 + 0.5;
+\n		//return float4(lerp(0.5, 1., lightness) * pixel.color.xyz, 1);
 \n	#else
 \n		return float4(n*0.5 + 0.5, 1);
 \n	#endif
@@ -377,7 +388,7 @@ static void B3R_Init(ID3D11Device* device) {
 	device->CreateRasterizerState(&wireframe_raster_desc, &B3R_STATE.wireframe_raster_state);
 	
 	D3D11_SAMPLER_DESC sampler_desc = {0};
-	sampler_desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+	sampler_desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; //D3D11_FILTER_MIN_MAG_MIP_POINT;
 	sampler_desc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
 	sampler_desc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
 	sampler_desc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
@@ -397,9 +408,14 @@ static void B3R_Init(ID3D11Device* device) {
 	D3D11_BLEND_DESC blend_state_desc = {0};
 	blend_state_desc.RenderTarget[0] = blend_desc;
 	device->CreateBlendState(&blend_state_desc, &B3R_STATE.blend_state);
+
+	uint32_t white_pixel = 0xFFFFFFFF;
+	B3R_TextureInit(&B3R_STATE.default_white_texture, 1, 1, &white_pixel);
 }
 
 static void B3R_Deinit(void) {
+	B3R_TextureDeinit(&B3R_STATE.default_white_texture);
+
 	B3R_STATE.blend_state->Release();
 	B3R_STATE.sampler_state->Release();
 	B3R_STATE.wireframe_raster_state->Release();
@@ -437,13 +453,37 @@ static void B3R_WireMeshDeinit(B3R_WireMesh* mesh) {
 	mesh->vertex_structured_buffer->Release();
 }
 
-static void B3R_MeshInit(B3R_Mesh* mesh, B3R_VertexLayout layout, const void* vertices, int num_vertices, const uint32_t* indices, int num_indices) {
-	//assert(layout == B3R_VertexLayout_PositionNormalColor); // TODO: support other layouts
+static void B3R_TextureInit(B3R_Texture* texture, int width, int height, void* data) {
+	D3D11_TEXTURE2D_DESC desc = {};
+	desc.Width              = width;  // in xube.h
+	desc.Height             = height; // in xube.h
+	desc.MipLevels          = 1;
+	desc.ArraySize          = 1;
+	desc.Format             = DXGI_FORMAT_R8G8B8A8_UNORM; //DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+	desc.SampleDesc.Count   = 1;
+	desc.Usage              = D3D11_USAGE_IMMUTABLE; // will never be updated
+	desc.BindFlags          = D3D11_BIND_SHADER_RESOURCE;
 
+	D3D11_SUBRESOURCE_DATA texture_data = {};
+	texture_data.pSysMem     = data;
+	texture_data.SysMemPitch = width * sizeof(uint32_t);
+
+	B3R_STATE.device->CreateTexture2D(&desc, &texture_data, &texture->texture);
+	B3R_STATE.device->CreateShaderResourceView(texture->texture, NULL, &texture->texture_view);
+}
+
+static void B3R_TextureDeinit(B3R_Texture* texture) {
+	texture->texture_view->Release();
+	texture->texture->Release();
+	*texture = {};
+}
+
+static void B3R_MeshInit(B3R_Mesh* mesh, B3R_VertexLayout layout, const void* vertices, int num_vertices, const uint32_t* indices, int num_indices) {
 	mesh->index_count = num_indices;
 	mesh->vertex_layout = layout;
 	mesh->vertex_buffer = NULL;
 	mesh->index_buffer = NULL;
+	
 	if (num_vertices > 0 && num_indices > 0) {
 		D3D11_SUBRESOURCE_DATA vertex_data = {vertices};
 		D3D11_BUFFER_DESC vertex_buffer_desc = {0};
@@ -464,7 +504,7 @@ static void B3R_MeshInit(B3R_Mesh* mesh, B3R_VertexLayout layout, const void* ve
 static void B3R_MeshDeinit(B3R_Mesh* mesh) {
 	if (mesh->vertex_buffer) mesh->vertex_buffer->Release();
 	if (mesh->index_buffer) mesh->index_buffer->Release();
-	memset(mesh, 0, sizeof(*mesh));
+	*mesh = {};
 }
 
 static void B3R_UpdateConstants() {
@@ -494,11 +534,17 @@ static void B3R_BeginDrawing(ID3D11DeviceContext* dc,
 	// dc->RSSetViewports(1, &viewport);
 	//dc->RSSetState(B3R_STATE.wireframe_raster_state);
 
+	dc->PSSetShaderResources(0, 1, &B3R_STATE.default_white_texture.texture_view);
+
 	dc->PSSetSamplers(0, 1, &B3R_STATE.sampler_state);
 
 	dc->OMSetRenderTargets(1, &framebuffer, depthbuffer);
 
 	dc->OMSetBlendState(B3R_STATE.blend_state, NULL, 0xffffffff);
+}
+
+static void B3R_BindTexture(B3R_Texture* texture) {
+	B3R_STATE.dc->PSSetShaderResources(0, 1, texture ? &texture->texture_view : &B3R_STATE.default_white_texture.texture_view);
 }
 
 static void B3R_EndDrawing(void) {

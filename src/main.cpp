@@ -43,6 +43,9 @@
 #define CGLTF_IMPLEMENTATION
 #include "third_party/cgltf.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "third_party/stb_image.h"
+
 #include "third_party/HandmadeMath.h"
 #include "utils/space_math.h"
 #include "utils/basic_3d_renderer/basic_3d_renderer.h"
@@ -109,7 +112,8 @@ static B3R_WireMesh g_grid_mesh;
 static ImportedMesh g_imported_mesh_bud;
 static ImportedMesh g_imported_mesh_leaf;
 
-static SimpleGPUMesh g_mesh_skybox;
+static B3R_Texture g_texture_skybox;
+static B3R_Mesh g_mesh_skybox;
 
 ////////////////////////////////////////////////////////////
 
@@ -232,9 +236,7 @@ static ImportedMesh ImportMesh(DS_Arena* arena, const char* filepath) {
 }
 
 
-static SimpleGPUMesh ImportSimpleGPUMesh(const char* filepath) {
-	SimpleGPUMesh result{};
-
+static void MeshInitFromFile(B3R_Mesh* result, const char* filepath) {
 	cgltf_options options{};
 	cgltf_data* data = NULL;
 
@@ -310,19 +312,14 @@ static SimpleGPUMesh ImportSimpleGPUMesh(const char* filepath) {
 				dst_vertices.data[i] = dst_vertex;
 			}
 
-			B3R_MeshInit(&result.gpu_mesh, B3R_VertexLayout_PosNorUVCol, dst_vertices.data, dst_vertices.length, dst_indices.data, dst_indices.length);
+			B3R_MeshInit(result, B3R_VertexLayout_PosNorUVCol, dst_vertices.data, dst_vertices.length, dst_indices.data, dst_indices.length);
 		}
 	}
 
 	cgltf_free(data);
 	assert(ok); // just assert for now, but this could be easily turned into a return value
-	
-	return result;
 }
 
-static void DeinitSimpleGPUMesh(SimpleGPUMesh* mesh) {
-	B3R_MeshDeinit(&mesh->gpu_mesh);
-}
 
 typedef DS_DynArray(HMM_Vec3) MeshVertexList;
 typedef DS_DynArray(uint32_t) MeshIndexList;
@@ -421,9 +418,8 @@ static void UpdateAndRender() {
 	UI_DX11_BeginFrame();
 	UI_BeginFrame(&ui_inputs, g_window_size);
 
-	UI_Box* root = UI_MakeRootBox(UI_KEY(), g_window_size.x, g_window_size.y, 0);
+	UI_Box* root = UI_MakeRootBox(UI_KEY(), 250.f, UI_SizeFit(), UI_BoxFlag_DrawOpaqueBackground|UI_BoxFlag_DrawBorder|UI_BoxFlag_ChildPadding);
 	UI_PushBox(root);
-	UI_AddBoxWithText(UI_KEY(), UI_SizeFit(), UI_SizeFit(), 0, STR_("This will become a plant generator!"));
 
 	PlantParameters plant_params_old;
 	memcpy(&plant_params_old, &g_plant_params, sizeof(PlantParameters)); // use memcpy to copy any compiler-introduced padding bytes as well
@@ -434,7 +430,6 @@ static void UpdateAndRender() {
 	UI_AddFmt(UI_KEY(), "Yaw twist: %!f", &g_plant_params.yaw_twist);
 	UI_AddFmt(UI_KEY(), "Drop pitch: %!f", &g_plant_params.drop_pitch);
 
-	//UI_AddButton(UI_KEY(), UI_SizeFit(), UI_SizeFit(), 0, STR_("Hello!"));
 	UI_PopBox(root);
 
 	bool regen_plant = memcmp(&plant_params_old, &g_plant_params, sizeof(PlantParameters)) != 0 || !g_has_plant_mesh;
@@ -444,7 +439,7 @@ static void UpdateAndRender() {
 		RegeneratePlantMesh();
 	}
 
-	UI_BoxComputeRects(root, {0, 0});
+	UI_BoxComputeRects(root, {20.f, 20.f});
 	UI_DrawBox(root);
 
 	UI_Outputs ui_outputs;
@@ -458,8 +453,10 @@ static void UpdateAndRender() {
 	B3R_BeginDrawing(g_dx11_device_context, g_dx11_framebuffer_view, g_dx11_depthbuffer_view, g_camera.cached.clip_from_world, g_camera.cached.position);
 	B3R_DrawWireMesh(&g_grid_mesh, 0.002f, 100000.f, 100000.f, 1.f, 1.f, 1.f, 1.f);
 	
-	B3R_DrawMesh(&g_mesh_skybox.gpu_mesh, B3R_DebugMode_HalfFlatNormal);
 	B3R_DrawMesh(&g_plant_gpu_mesh, B3R_DebugMode_HalfFlatNormal);
+
+	B3R_BindTexture(&g_texture_skybox);
+	B3R_DrawMesh(&g_mesh_skybox, B3R_DebugMode_None);
 	
 	B3R_EndDrawing();
 	// --------------------------------------------
@@ -612,6 +609,14 @@ static void InitGridMesh(B3R_WireMesh* mesh) {
 	B3R_WireMeshInit(mesh, (B3R_WireVertex*)wire_verts.data, wire_verts.length);
 }
 
+static void TextureInitFromFile(B3R_Texture* texture, const char* filepath) {
+	int size_x, size_y, num_channels;
+	uint8_t* data = stbi_load(filepath, &size_x, &size_y, &num_channels, 4);
+	assert(data);
+	B3R_TextureInit(texture, size_x, size_y, data);
+	stbi_image_free(data);
+}
+
 int main() {
 	InitApp();
 
@@ -625,7 +630,8 @@ int main() {
 	g_imported_mesh_leaf = ImportMesh(&g_persist, "../resources/leaf_with_morph_targets.glb");
 	g_imported_mesh_bud = ImportMesh(&g_persist, "../resources/bud.glb");
 	
-	g_mesh_skybox = ImportSimpleGPUMesh("../resources/skybox.glb");
+	MeshInitFromFile(&g_mesh_skybox, "../resources/skybox.glb");
+	TextureInitFromFile(&g_texture_skybox, "../resources/skybox_texture.png");
 
 	while (!OS_WINDOW_ShouldClose(&g_window)) {
 		Input_OS_Events input_events;
@@ -637,8 +643,10 @@ int main() {
 
 		UpdateAndRender();
 	}
+	
+	B3R_TextureDeinit(&g_texture_skybox);
+	B3R_MeshDeinit(&g_mesh_skybox);
 
-	DeinitSimpleGPUMesh(&g_mesh_skybox);
 	B3R_WireMeshDeinit(&g_grid_mesh);
 	DS_ArenaDeinit(&g_plant_arena);
 

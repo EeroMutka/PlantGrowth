@@ -476,8 +476,10 @@ static void UpdateAndRender() {
 	B3R_BeginDrawing(g_dx11_device_context, g_dx11_framebuffer_view, g_dx11_depthbuffer_view, g_camera.cached.clip_from_world, g_camera.cached.position);
 	B3R_DrawWireMesh(&g_grid_mesh, 0.001f, 100000.f, 100000.f, 1.f, 1.f, 1.f, 1.f);
 	
-	B3R_DrawMesh(&g_plant_gpu_mesh, B3R_DebugMode_HalfVertexNormal);
+	B3R_BindDirectionalLight(0, {0.f, 0.f, -1.f}, 0.7f, {1.f, 1.f, 1.f});
+	B3R_DrawMesh(&g_plant_gpu_mesh, B3R_DebugMode_None);
 
+	B3R_BindDirectionalLight(0, {}, 1.f, {1.f, 1.f, 1.f});
 	B3R_BindTexture(&g_texture_skybox);
 	B3R_DrawMesh(&g_mesh_skybox, B3R_DebugMode_None);
 	

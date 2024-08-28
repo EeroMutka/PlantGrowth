@@ -80,8 +80,13 @@ static void B3R_BeginDrawing(ID3D11DeviceContext* dc,
 static void B3R_EndDrawing(void);
 
 // By default, BeginDrawing binds a blank white texture. You can override the active texture with B3R_BindTexture.
-// - You may pass NULL into the `texture` to bind the blank texture back again
+// You may pass NULL into the `texture` to bind the blank texture back again
 static void B3R_BindTexture(B3R_Texture* texture);
+
+// There are 3 directional lights active at all times. With this, you can overwrite the values of one of them.
+// By default, BeginDrawing binds empty directional lights for slots 1 and 2, and binds a light with white color and a softness of 1 such
+// that it's as if there is no lighting in the world.
+static void B3R_BindDirectionalLight(int index, HMM_Vec3 direction, float softness, HMM_Vec3 color);
 
 static void B3R_DrawMesh(const B3R_Mesh* mesh, B3R_DebugMode debug_mode);
 static void B3R_DrawWireMesh(const B3R_WireMesh* mesh,
@@ -95,9 +100,8 @@ typedef struct B3R_Constants {
 	HMM_Vec3 camera_pos;
 	float wire_thickness;
 	float wire_color[4];
-	HMM_Vec4 light_dir_1;
-	HMM_Vec3 light_color_1;
-	float light_softness_1;
+	HMM_Vec4 light_dirs[3];
+	HMM_Vec4 light_colors[3];
 	float wire_fade_dist_min;
 	float wire_fade_dist_max;
 	int debug_mode;
@@ -132,9 +136,8 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n		float3 camera_pos;
 \n		float wire_thickness;
 \n		float4 wire_color;
-\n		float4 light_dir_1;
-\n		float3 light_color_1;
-\n		float light_softness_1;
+\n		float4 light_dirs[3];
+\n		float4 light_colors[3];
 \n		float wire_fade_dist_min;
 \n		float wire_fade_dist_max;
 \n		int debug_mode;
@@ -221,10 +224,15 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n		}
 \n
 \n	#if defined(B3R_VERT_LAYOUT_POSNORUVCOL)
-\n		float lightness = dot(n, normalize(float3(0, 0, 1)))*0.5 + 0.5;
-\n		float4 result = color_texture.Sample(default_sampler, pixel.uv) * pixel.color;
+\n		//float lightness = dot(n, normalize(float3(0, 0, 1)))*0.1 + 0.9;
+\n		float3 albedo = color_texture.Sample(default_sampler, pixel.uv).rgb * pixel.color.rgb;
+\n		float3 total = float3(0, 0, 0);
+\n		for (int i = 0; i < 3; i++) {
+\n			float light_softness = light_dirs[i].w;
+\n			total += (dot(n, light_dirs[i].xyz)*(light_softness - 1.f) + light_softness) * albedo * light_colors[i].rgb;
+\n		}
 \n		//result.rgb *= lightness;
-\n		return result;
+\n		return float4(total, 1.0);
 \n		//return float4(lerp(0.5, 1., lightness) * pixel.color.xyz, 1);
 \n	#else
 \n		return float4(n*0.5 + 0.5, 1);
@@ -240,9 +248,8 @@ static const char B3R_WIRE_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n		float3 camera_pos;
 \n		float wire_thickness;
 \n		float4 wire_color;
-\n		float4 light_dir_1;
-\n		float3 light_color_1;
-\n		float light_softness_1;
+\n		float4 light_dirs[3];
+\n		float4 light_colors[3];
 \n		float wire_fade_dist_min;
 \n		float wire_fade_dist_max;
 \n		int debug_mode;
@@ -553,6 +560,10 @@ static void B3R_BeginDrawing(ID3D11DeviceContext* dc,
 	dc->OMSetRenderTargets(1, &framebuffer, depthbuffer);
 
 	dc->OMSetBlendState(B3R_STATE.blend_state, NULL, 0xffffffff);
+
+	B3R_BindDirectionalLight(0, {0.f, 0.f, 0.f}, 1.f, {1.f, 1.f, 1.f});
+	B3R_BindDirectionalLight(1, {0.f, 0.f, 0.f}, 1.f, {0.f, 0.f, 0.f});
+	B3R_BindDirectionalLight(2, {0.f, 0.f, 0.f}, 1.f, {0.f, 0.f, 0.f});
 }
 
 static void B3R_BindTexture(B3R_Texture* texture) {
@@ -584,6 +595,14 @@ static void B3R_DrawWireMesh(const B3R_WireMesh* mesh,
 	
 	B3R_STATE.dc->Draw(mesh->num_wire_vertices * 3, 0);
 }
+
+static void B3R_BindDirectionalLight(int index, HMM_Vec3 direction, float softness, HMM_Vec3 color) {
+	assert(index >= 0 && index <= 3);
+	B3R_STATE.constants.light_dirs[index].XYZ = direction;
+	B3R_STATE.constants.light_dirs[index].W = softness;
+	B3R_STATE.constants.light_colors[index].XYZ = color;
+}
+
 
 static void B3R_DrawMesh(const B3R_Mesh* mesh, B3R_DebugMode debug_mode) {
 	B3R_STATE.constants.debug_mode = (int)debug_mode;

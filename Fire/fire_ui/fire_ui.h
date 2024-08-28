@@ -398,6 +398,7 @@ typedef struct UI_State {
 	UI_Vec2 last_released_mouse_pos;
 	UI_Vec2 last_pressed_mouse_pos;
 	UI_Vec2 mouse_travel_distance_after_press; // NOTE: holding alt/shift will modify the speed at which this value changes
+	float mouse_abs_travel_distance_after_press; // NOTE: holding alt/shift will modify the speed at which this value changes
 
 	UI_Key mouse_clicking_down_box;
 	UI_Key mouse_clicking_down_box_new;
@@ -1062,7 +1063,7 @@ UI_API UI_Box* UI_AddValNumeric(UI_Key key, UI_Size w, UI_Size h, void* value_64
 
 	UI_Box* box = NULL;
 	bool dragging = UI_IsClickingDown(key) && UI_InputIsDown(UI_Input_MouseLeft);
-	bool has_moved_mouse_after_press = UI_Abs(UI_STATE.mouse_travel_distance_after_press.x) >= 2.f;
+	bool has_moved_mouse_after_press = UI_STATE.mouse_abs_travel_distance_after_press >= 2.f;
 
 	UI_String value_str;
 	if (is_float) {
@@ -1090,11 +1091,11 @@ UI_API UI_Box* UI_AddValNumeric(UI_Key key, UI_Size w, UI_Size h, void* value_64
 		box = UI_AddValText(key, w, h, &UI_STATE.edit_number_text, NULL);
 
 		if (is_float) {
-			STR_ParseFloat(UI_TextToStr(UI_STATE.edit_number_text), (double*)value_64_bit);
+			if (!STR_ParseFloat(UI_TextToStr(UI_STATE.edit_number_text), (double*)value_64_bit)) *(double*)value_64_bit = 0.f;
 		} else if (is_signed) {
-			STR_ParseI64(UI_TextToStr(UI_STATE.edit_number_text), (int64_t*)value_64_bit);
+			if (!STR_ParseI64(UI_TextToStr(UI_STATE.edit_number_text), (int64_t*)value_64_bit)) *(int64_t*)value_64_bit = 0;
 		} else {
-			STR_ParseU64Ex(UI_TextToStr(UI_STATE.edit_number_text), 10, (uint64_t*)value_64_bit);
+			if (!STR_ParseU64Ex(UI_TextToStr(UI_STATE.edit_number_text), 10, (uint64_t*)value_64_bit)) *(uint64_t*)value_64_bit = 0;
 		}
 	}
 	else {
@@ -2486,11 +2487,13 @@ UI_API void UI_EndFrame(UI_Outputs* outputs/*, GPU_Graph *graph, GPU_DescriptorA
 		if (UI_InputIsDown(UI_Input_Alt)) scale /= 50.f;
 		if (UI_InputIsDown(UI_Input_Shift)) scale *= 50.f;
 		UI_STATE.mouse_travel_distance_after_press = UI_AddV2(UI_STATE.mouse_travel_distance_after_press, UI_MulV2F(delta, scale));
+		UI_STATE.mouse_abs_travel_distance_after_press += sqrtf(delta.x*delta.x + delta.y*delta.y);
 		UI_STATE.last_pressed_mouse_pos = UI_STATE.mouse_pos;
 	}
 	else {
 		UI_STATE.last_released_mouse_pos = UI_STATE.mouse_pos;
-		UI_STATE.mouse_travel_distance_after_press = UI_VEC2{0};
+		UI_STATE.mouse_travel_distance_after_press = UI_VEC2{0, 0};
+		UI_STATE.mouse_abs_travel_distance_after_press = 0.f;
 	}
 
 	UI_STATE.time_since_pressed_lmb += UI_STATE.inputs.frame_delta_time;

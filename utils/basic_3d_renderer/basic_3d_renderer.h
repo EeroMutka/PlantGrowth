@@ -95,6 +95,9 @@ typedef struct B3R_Constants {
 	HMM_Vec3 camera_pos;
 	float wire_thickness;
 	float wire_color[4];
+	HMM_Vec4 light_dir_1;
+	HMM_Vec3 light_color_1;
+	float light_softness_1;
 	float wire_fade_dist_min;
 	float wire_fade_dist_max;
 	int debug_mode;
@@ -129,6 +132,9 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n		float3 camera_pos;
 \n		float wire_thickness;
 \n		float4 wire_color;
+\n		float4 light_dir_1;
+\n		float3 light_color_1;
+\n		float light_softness_1;
 \n		float wire_fade_dist_min;
 \n		float wire_fade_dist_max;
 \n		int debug_mode;
@@ -234,6 +240,9 @@ static const char B3R_WIRE_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n		float3 camera_pos;
 \n		float wire_thickness;
 \n		float4 wire_color;
+\n		float4 light_dir_1;
+\n		float3 light_color_1;
+\n		float light_softness_1;
 \n		float wire_fade_dist_min;
 \n		float wire_fade_dist_max;
 \n		int debug_mode;

@@ -190,9 +190,10 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n	Texture2D    color_texture : register(t0);
 \n	SamplerState default_sampler : register(s0);
 \n	
-\n	float4 PSMain(PixelData pixel) : SV_TARGET {
+\n	float4 PSMain(PixelData pixel, bool is_front_face : SV_IsFrontFace) : SV_TARGET {
+\n		float face_dir = is_front_face ? -1.f : 1.f; // `is_front_face` seems to have an inverted convertion to ours
 \n	#if defined(B3R_VERT_LAYOUT_POSNORUVCOL)
-\n		float3 n = pixel.normal;
+\n		float3 n = pixel.normal*face_dir;
 \n	#else
 \n		float3 n = normalize(cross(ddy(pixel.position_ws), ddx(pixel.position_ws)));
 \n	#endif
@@ -204,7 +205,7 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n			}
 \n	#if defined(B3R_VERT_LAYOUT_POSNORUVCOL)
 \n			if (debug_mode == 4 || debug_mode == 5) { // vertex normal or half vertex normal
-\n				return debug_mode == 5 ? float4(pixel.normal*0.5 + 0.5, 1) : float4(pixel.normal, 1);
+\n				return debug_mode == 5 ? float4(pixel.normal*face_dir*0.5 + 0.5, 1) : float4(pixel.normal*face_dir, 1);
 \n			}
 \n	#endif
 \n			if (debug_mode == 6) { // blockout grid mode
@@ -214,8 +215,10 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n		}
 \n
 \n	#if defined(B3R_VERT_LAYOUT_POSNORUVCOL)
-\n		return color_texture.Sample(default_sampler, pixel.uv) * pixel.color;
-\n		//float lightness = dot(n, normalize(float3(1, 1, 1)))*0.5 + 0.5;
+\n		float lightness = dot(n, normalize(float3(0, 0, 1)))*0.5 + 0.5;
+\n		float4 result = color_texture.Sample(default_sampler, pixel.uv) * pixel.color;
+\n		//result.rgb *= lightness;
+\n		return result;
 \n		//return float4(lerp(0.5, 1., lightness) * pixel.color.xyz, 1);
 \n	#else
 \n		return float4(n*0.5 + 0.5, 1);

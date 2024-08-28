@@ -59,20 +59,20 @@
 
 #include "growth.h"
 
+struct SimpleGPUMeshVertex {
+	HMM_Vec3 position;
+	HMM_Vec3 normal;
+	HMM_Vec2 uv;
+	uint8_t r, g, b, a; // vertex color
+};
+
 struct ImportedMeshMorphTarget {
-	DS_DynArray(HMM_Vec3) vertices;
+	DS_DynArray(SimpleGPUMeshVertex) vertices;
 };
 
 struct ImportedMesh {
 	DS_DynArray(ImportedMeshMorphTarget) vertices_morphs;
 	DS_DynArray(uint32_t) indices;
-};
-
-struct SimpleGPUMeshVertex {
-	float x, y, z;      // position
-	float nx, ny, nz;   // normal
-	float u, v;         // uv-coordinates
-	uint8_t r, g, b, a; // vertex color
 };
 
 struct SimpleGPUMesh {
@@ -149,7 +149,7 @@ static void DebugDrawPlant(const GizmosViewport* vp, Plant* plant) {
 	}
 }
 
-static void ImportMeshAddMorph(DS_Arena* arena, ImportedMesh* result, cgltf_attribute* attributes, int attributes_count) {
+static bool ImportMeshAddMorph(DS_Arena* arena, ImportedMesh* result, cgltf_attribute* attributes, int attributes_count) {
 	HMM_Vec3* positions_data = NULL;
 	HMM_Vec3* normals_data = NULL;
 	HMM_Vec2* texcoords_data = NULL;
@@ -171,21 +171,27 @@ static void ImportMeshAddMorph(DS_Arena* arena, ImportedMesh* result, cgltf_attr
 		}
 	}
 
-	ImportedMeshMorphTarget morph{};
-	DS_ArrInit(&morph.vertices, arena);
-	DS_ArrReserve(&morph.vertices, num_vertices);
+	bool ok = positions_data && normals_data;
+	if (ok) {
+		ImportedMeshMorphTarget morph{};
+		DS_ArrInit(&morph.vertices, arena);
+		DS_ArrReserve(&morph.vertices, num_vertices);
 
-	for (uint32_t i = 0; i < num_vertices; i++) {
-		HMM_Vec3 position = positions_data[i];
+		for (uint32_t i = 0; i < num_vertices; i++) {
+			HMM_Vec3 position = positions_data[i];
+			HMM_Vec3 normal = normals_data[i];
+			HMM_Vec2 uv = texcoords_data ? texcoords_data[i] : HMM_Vec2{0, 0};
 		
-		// In GLTF, Y is up, but we want Z up.
-		position = {position.X, -1.f * position.Z, position.Y};
-		// normal = {normal.X, -1.f * normal.Z, normal.Y};
-		
-		DS_ArrPush(&morph.vertices, position);
-	}
+			// In GLTF, Y is up, but we want Z up.
+			position = {position.X, -position.Z, position.Y};
+			normal = {normal.X, -normal.Z, normal.Y};
+
+			DS_ArrPush(&morph.vertices, {position, normal, uv, 255, 255, 255, 255});
+		}
 	
-	DS_ArrPush(&result->vertices_morphs, morph);
+		DS_ArrPush(&result->vertices_morphs, morph);
+	}
+	return ok;
 }
 
 static ImportedMesh ImportMesh(DS_Arena* arena, const char* filepath) {
@@ -222,11 +228,11 @@ static ImportedMesh ImportMesh(DS_Arena* arena, const char* filepath) {
 		}
 		else assert(0);
 
-		ImportMeshAddMorph(arena, &result, primitive->attributes, (int)primitive->attributes_count);
+		ok = ok && ImportMeshAddMorph(arena, &result, primitive->attributes, (int)primitive->attributes_count);
 			
 		for (int i = 0; i < primitive->targets_count; i++) {
 			cgltf_morph_target morph_target = primitive->targets[i];
-			ImportMeshAddMorph(arena, &result, morph_target.attributes, (int)morph_target.attributes_count);
+			ok = ok && ImportMeshAddMorph(arena, &result, morph_target.attributes, (int)morph_target.attributes_count);
 		}
 	}
 
@@ -235,9 +241,12 @@ static ImportedMesh ImportMesh(DS_Arena* arena, const char* filepath) {
 	return result;
 }
 
-
 static void MeshInitFromFile(B3R_Mesh* result, const char* filepath) {
-	cgltf_options options{};
+	ImportedMesh mesh = ImportMesh(&g_temp, filepath);
+	ImportedMeshMorphTarget main_morph = DS_ArrGet(mesh.vertices_morphs, 0);
+	B3R_MeshInit(result, B3R_VertexLayout_PosNorUVCol, main_morph.vertices.data, main_morph.vertices.length, mesh.indices.data, mesh.indices.length);
+
+	/*cgltf_options options{};
 	cgltf_data* data = NULL;
 
 	bool ok = true;
@@ -317,11 +326,11 @@ static void MeshInitFromFile(B3R_Mesh* result, const char* filepath) {
 	}
 
 	cgltf_free(data);
-	assert(ok); // just assert for now, but this could be easily turned into a return value
+	assert(ok); // just assert for now, but this could be easily turned into a return value*/
 }
 
 
-typedef DS_DynArray(HMM_Vec3) MeshVertexList;
+typedef DS_DynArray(SimpleGPUMeshVertex) MeshVertexList;
 typedef DS_DynArray(uint32_t) MeshIndexList;
 
 static void MeshBuilderAddQuad(MeshIndexList* list, uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
@@ -335,14 +344,25 @@ static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* 
 	
 	uint32_t first_vertex = (uint32_t)vertices->length;
 	for (int i = 0; i < base_morph.vertices.length; i++) {
-		HMM_Vec3 src_vert = base_morph.vertices.data[i];
+		SimpleGPUMeshVertex vert = base_morph.vertices.data[i];
+		
 		if (morph_amount > 0.f) {
 			assert(imported_mesh->vertices_morphs.length > 1);
 			ImportedMeshMorphTarget second_morph = DS_ArrGet(imported_mesh->vertices_morphs, 1);
-			src_vert += morph_amount * second_morph.vertices.data[i];
+			SimpleGPUMeshVertex second_vert = second_morph.vertices.data[i];
+		
+			vert.position += morph_amount * second_vert.position;
+			vert.normal += morph_amount * second_vert.normal;
+			vert.normal = HMM_NormV3(vert.normal);
 		}
 
-		HMM_Vec3 vert = position + HMM_RotateV3(src_vert * scale, rotation);
+		vert.position = position + HMM_RotateV3(vert.position * scale, rotation);
+		vert.normal = HMM_RotateV3(vert.normal, rotation);
+
+		vert.r = 50;
+		vert.g = 150;
+		vert.b = 40;
+		vert.a = 255;
 		DS_ArrPush(vertices, vert);
 	}
 
@@ -366,15 +386,18 @@ static void RegeneratePlantMesh() {
 		uint32_t prev_circle_first_vertex = 0;
 		for (int j = 0; j < stem->points.length; j++) {
 			StemPoint* stem_point = &stem->points.data[j];
-			HMM_Vec3 local_x_offset = HMM_RotateV3({stem_point->thickness, 0, 0}, stem_point->rotation);
-			HMM_Vec3 local_y_offset = HMM_RotateV3({0, stem_point->thickness, 0}, stem_point->rotation);
+			HMM_Vec3 local_x_dir = HMM_RotateV3({1, 0, 0}, stem_point->rotation);
+			HMM_Vec3 local_y_dir = HMM_RotateV3({0, 1, 0}, stem_point->rotation);
 
 			uint32_t first_vertex = (uint32_t)vertices.length;
 			int num_segments = 8;
 			for (int k = 0; k < num_segments; k++) {
 				float theta = 2.f * HMM_PI32 * (float)k / (float)num_segments;
-				HMM_Vec3 p = stem_point->point + local_x_offset * cosf(theta) + local_y_offset * sinf(theta);
-				DS_ArrPush(&vertices, p);
+				
+				HMM_Vec3 point_normal = local_x_dir * cosf(theta) + local_y_dir * sinf(theta);
+				HMM_Vec3 point = stem_point->point + point_normal * stem_point->thickness;
+
+				DS_ArrPush(&vertices, {point, point_normal, {0, 0}, 50, 150, 40, 255});
 				
 				if (j > 0) {
 					int next_k = (k + 1) % 8;
@@ -395,7 +418,7 @@ static void RegeneratePlantMesh() {
 		}
 	}
 
-	B3R_MeshInit(&g_plant_gpu_mesh, B3R_VertexLayout_Position, vertices.data, vertices.length, indices.data, indices.length);
+	B3R_MeshInit(&g_plant_gpu_mesh, B3R_VertexLayout_PosNorUVCol, vertices.data, vertices.length, indices.data, indices.length);
 	g_has_plant_mesh = true;
 }
 
@@ -451,9 +474,9 @@ static void UpdateAndRender() {
 	
 	// -- B3R drawing -----------------------------
 	B3R_BeginDrawing(g_dx11_device_context, g_dx11_framebuffer_view, g_dx11_depthbuffer_view, g_camera.cached.clip_from_world, g_camera.cached.position);
-	B3R_DrawWireMesh(&g_grid_mesh, 0.002f, 100000.f, 100000.f, 1.f, 1.f, 1.f, 1.f);
+	B3R_DrawWireMesh(&g_grid_mesh, 0.001f, 100000.f, 100000.f, 1.f, 1.f, 1.f, 1.f);
 	
-	B3R_DrawMesh(&g_plant_gpu_mesh, B3R_DebugMode_HalfFlatNormal);
+	B3R_DrawMesh(&g_plant_gpu_mesh, B3R_DebugMode_HalfVertexNormal);
 
 	B3R_BindTexture(&g_texture_skybox);
 	B3R_DrawMesh(&g_mesh_skybox, B3R_DebugMode_None);

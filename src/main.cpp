@@ -65,6 +65,17 @@ struct ImportedMesh {
 	DS_DynArray(uint32_t) indices;
 };
 
+struct SimpleGPUMeshVertex {
+	float x, y, z;      // position
+	float nx, ny, nz;   // normal
+	float u, v;         // uv-coordinates
+	uint8_t r, g, b, a; // vertex color
+};
+
+struct SimpleGPUMesh {
+	B3R_Mesh gpu_mesh;
+};
+
 //// Globals ///////////////////////////////////////////////
 
 static UI_Vec2 g_window_size = {1920, 1080};
@@ -91,12 +102,14 @@ static DS_Arena g_plant_arena;
 static Plant g_plant;
 
 static bool g_has_plant_mesh;
-static B3R_Mesh g_plant_mesh;
+static B3R_Mesh g_plant_gpu_mesh;
 
 static B3R_WireMesh g_grid_mesh;
 
 static ImportedMesh g_imported_mesh_bud;
 static ImportedMesh g_imported_mesh_leaf;
+
+static SimpleGPUMesh g_mesh_skybox;
 
 ////////////////////////////////////////////////////////////
 
@@ -181,46 +194,134 @@ static ImportedMesh ImportMesh(DS_Arena* arena, const char* filepath) {
 
 	bool ok = true;
 	ok = cgltf_parse_file(&options, filepath, &data) == cgltf_result_success;
-
 	ok = ok && cgltf_load_buffers(&options, data, filepath) == cgltf_result_success;
-
 	ok = ok && cgltf_validate(data) == cgltf_result_success;
-
-	ok = ok && data->meshes_count == 1;
+	ok = ok && data->meshes_count == 1 && data->meshes[0].primitives_count == 1;
 	
 	if (ok) {
 		cgltf_mesh* mesh = &data->meshes[0];
+		cgltf_primitive* primitive = &mesh->primitives[0];
 
-		for (cgltf_size primitive_i = 0; primitive_i < mesh->primitives_count; primitive_i++) {
-			cgltf_primitive* primitive = &mesh->primitives[primitive_i];
-			cgltf_accessor* indices = primitive->indices;
+		cgltf_accessor* indices = primitive->indices;
+		DS_ArrResizeUndef(&result.indices, (int)indices->count);
 
-			DS_ArrResizeUndef(&result.indices, (int)indices->count);
-
-			void* primitive_indices = (char*)indices->buffer_view->buffer->data + indices->buffer_view->offset;
-			if (indices->component_type == cgltf_component_type_r_16u) {
-				for (cgltf_size i = 0; i < indices->count; i++) {
-					result.indices.data[i] = ((uint16_t*)primitive_indices)[i];
-				}
+		void* primitive_indices = (char*)indices->buffer_view->buffer->data + indices->buffer_view->offset;
+		if (indices->component_type == cgltf_component_type_r_16u) {
+			for (cgltf_size i = 0; i < indices->count; i++) {
+				result.indices.data[i] = ((uint16_t*)primitive_indices)[i];
 			}
-			else if (indices->component_type == cgltf_component_type_r_32u) {
-				for (cgltf_size i = 0; i < indices->count; i++) {
-					result.indices.data[i] = ((uint32_t*)primitive_indices)[i];
-				}
+		}
+		else if (indices->component_type == cgltf_component_type_r_32u) {
+			for (cgltf_size i = 0; i < indices->count; i++) {
+				result.indices.data[i] = ((uint32_t*)primitive_indices)[i];
 			}
-			else assert(0);
+		}
+		else assert(0);
 
-			ImportMeshAddMorph(arena, &result, primitive->attributes, (int)primitive->attributes_count);
+		ImportMeshAddMorph(arena, &result, primitive->attributes, (int)primitive->attributes_count);
 			
-			for (int i = 0; i < primitive->targets_count; i++) {
-				cgltf_morph_target morph_target = primitive->targets[i];
-				ImportMeshAddMorph(arena, &result, morph_target.attributes, (int)morph_target.attributes_count);
-			}
+		for (int i = 0; i < primitive->targets_count; i++) {
+			cgltf_morph_target morph_target = primitive->targets[i];
+			ImportMeshAddMorph(arena, &result, morph_target.attributes, (int)morph_target.attributes_count);
 		}
 	}
 
-	assert(ok);
+	cgltf_free(data);
+	assert(ok); // just assert for now, but this could be easily turned into a return value
 	return result;
+}
+
+
+static SimpleGPUMesh ImportSimpleGPUMesh(const char* filepath) {
+	SimpleGPUMesh result{};
+
+	cgltf_options options{};
+	cgltf_data* data = NULL;
+
+	bool ok = true;
+	ok = cgltf_parse_file(&options, filepath, &data) == cgltf_result_success;
+	ok = ok && cgltf_load_buffers(&options, data, filepath) == cgltf_result_success;
+	ok = ok && cgltf_validate(data) == cgltf_result_success;
+	ok = ok && data->meshes_count == 1 && data->meshes[0].primitives_count == 1;
+
+	if (ok) {
+		cgltf_mesh* mesh = &data->meshes[0];
+		cgltf_primitive* primitive = &mesh->primitives[0];
+
+		DS_DynArray(uint32_t) dst_indices = {&g_temp};
+		DS_DynArray(SimpleGPUMeshVertex) dst_vertices = {&g_temp};
+
+		cgltf_accessor* indices = primitive->indices;
+		DS_ArrResizeUndef(&dst_indices, (int)indices->count);
+
+		void* primitive_indices = (char*)indices->buffer_view->buffer->data + indices->buffer_view->offset;
+		if (indices->component_type == cgltf_component_type_r_16u) {
+			for (cgltf_size i = 0; i < indices->count; i++) {
+				dst_indices.data[i] = ((uint16_t*)primitive_indices)[i];
+			}
+		}
+		else if (indices->component_type == cgltf_component_type_r_32u) {
+			for (cgltf_size i = 0; i < indices->count; i++) {
+				dst_indices.data[i] = ((uint32_t*)primitive_indices)[i];
+			}
+		}
+		else assert(0);
+
+		HMM_Vec3* positions_data = NULL;
+		HMM_Vec3* normals_data = NULL;
+		HMM_Vec2* texcoords_data = NULL;
+
+		uint32_t num_vertices = (uint32_t)primitive->attributes[0].data->count;
+		DS_ArrResizeUndef(&dst_vertices, num_vertices);
+
+		for (int i = 0; i < primitive->attributes_count; i++) {
+			cgltf_attribute* attribute = &primitive->attributes[i];
+			void* attribute_data = (char*)attribute->data->buffer_view->buffer->data + attribute->data->buffer_view->offset;
+
+			assert(attribute->data->count == num_vertices);
+
+			if (attribute->type == cgltf_attribute_type_position) {
+				positions_data = (HMM_Vec3*)attribute_data;
+			} else if (attribute->type == cgltf_attribute_type_normal) {
+				normals_data = (HMM_Vec3*)attribute_data;
+			} else if (attribute->type == cgltf_attribute_type_texcoord) {
+				texcoords_data = (HMM_Vec2*)attribute_data;
+			}
+		}
+
+		ok = positions_data != NULL && normals_data != NULL && texcoords_data != NULL;
+		if (ok) {
+			for (uint32_t i = 0; i < num_vertices; i++) {
+				HMM_Vec3 position = positions_data[i];
+				HMM_Vec3 normal = normals_data[i];
+				HMM_Vec2 uv = texcoords_data[i];
+
+				// In GLTF, Y is up, but we want Z up.
+				position = {position.X, -1.f * position.Z, position.Y};
+				normal = {normal.X, -1.f * normal.Z, normal.Y};
+
+				SimpleGPUMeshVertex dst_vertex = {
+					position.X, position.Y, position.Z,
+					normal.X, normal.Y, normal.Z,
+					uv.X, uv.Y,
+					255, 255, 255, 255,
+				};
+			
+				dst_vertices.data[i] = dst_vertex;
+			}
+
+			B3R_MeshInit(&result.gpu_mesh, B3R_VertexLayout_PosNorUVCol, dst_vertices.data, dst_vertices.length, dst_indices.data, dst_indices.length);
+		}
+	}
+
+	cgltf_free(data);
+	assert(ok); // just assert for now, but this could be easily turned into a return value
+	
+	return result;
+}
+
+static void DeinitSimpleGPUMesh(SimpleGPUMesh* mesh) {
+	B3R_MeshDeinit(&mesh->gpu_mesh);
 }
 
 typedef DS_DynArray(HMM_Vec3) MeshVertexList;
@@ -241,7 +342,7 @@ static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* 
 		if (morph_amount > 0.f) {
 			assert(imported_mesh->vertices_morphs.length > 1);
 			ImportedMeshMorphTarget second_morph = DS_ArrGet(imported_mesh->vertices_morphs, 1);
-			src_vert = HMM_LerpV3(src_vert, morph_amount, second_morph.vertices.data[i]);
+			src_vert += morph_amount * second_morph.vertices.data[i];
 		}
 
 		HMM_Vec3 vert = position + HMM_RotateV3(src_vert * scale, rotation);
@@ -256,7 +357,7 @@ static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* 
 
 static void RegeneratePlantMesh() {
 	if (g_has_plant_mesh) {
-		B3R_MeshDeinit(&g_plant_mesh);
+		B3R_MeshDeinit(&g_plant_gpu_mesh);
 	}
 	
 	MeshVertexList vertices = {&g_temp};
@@ -289,22 +390,22 @@ static void RegeneratePlantMesh() {
 		
 		// Add a bud (or leaf) at the end.
 		StemPoint* last_point = DS_ArrPeekPtr(stem->points);
-		if (true || stem->end_leaf_expand > 0.f) {
-			MeshBuilderAddImportedMesh(&vertices, &indices, &g_imported_mesh_leaf, last_point->point, last_point->rotation, 1.f, 0.5f);
+		if (stem->end_leaf_expand > 0.f) {
+			MeshBuilderAddImportedMesh(&vertices, &indices, &g_imported_mesh_leaf, last_point->point, last_point->rotation, 1.f, stem->end_leaf_expand);
 		}
 		else {
 			MeshBuilderAddImportedMesh(&vertices, &indices, &g_imported_mesh_bud, last_point->point, last_point->rotation, 1.f, 0.f);
 		}
 	}
 
-	B3R_MeshInit(&g_plant_mesh, B3R_VertexLayout_Position, vertices.data, vertices.length, indices.data, indices.length);
+	B3R_MeshInit(&g_plant_gpu_mesh, B3R_VertexLayout_Position, vertices.data, vertices.length, indices.data, indices.length);
 	g_has_plant_mesh = true;
 }
 
 static void UpdateAndRender() {
 	DS_ArenaReset(&g_temp);
 
-	Camera_Update(&g_camera, &g_inputs, 0.01f, 0.001f, 70.f, g_window_size.x / g_window_size.y, 0.01f, 1000.f);
+	Camera_Update(&g_camera, &g_inputs, 0.002f, 0.001f, 70.f, g_window_size.x / g_window_size.y, 0.01f, 1000.f);
 
 	GizmosViewport vp = {0};
 	vp.camera = g_camera.cached;
@@ -349,14 +450,19 @@ static void UpdateAndRender() {
 	UI_Outputs ui_outputs;
 	UI_EndFrame(&ui_outputs);
 	
-	FLOAT clearcolor[4] = { 0.3f, 0.4f, 0.5f, 1.f };
+	FLOAT clearcolor[4] = { 89.f/255.f, 189.f/255.f, 255.f/255.f, 1.f };
 	g_dx11_device_context->ClearRenderTargetView(g_dx11_framebuffer_view, clearcolor);
 	g_dx11_device_context->ClearDepthStencilView(g_dx11_depthbuffer_view, D3D11_CLEAR_DEPTH, 1.0f, 0);
 	
+	// -- B3R drawing -----------------------------
 	B3R_BeginDrawing(g_dx11_device_context, g_dx11_framebuffer_view, g_dx11_depthbuffer_view, g_camera.cached.clip_from_world, g_camera.cached.position);
-	B3R_DrawWireMesh(&g_grid_mesh, 0.01f, 100000.f, 100000.f, 1.f, 1.f, 1.f, 1.f);
-	B3R_DrawMesh(&g_plant_mesh, B3R_DebugMode_HalfFlatNormal);
+	B3R_DrawWireMesh(&g_grid_mesh, 0.002f, 100000.f, 100000.f, 1.f, 1.f, 1.f, 1.f);
+	
+	B3R_DrawMesh(&g_mesh_skybox.gpu_mesh, B3R_DebugMode_HalfFlatNormal);
+	B3R_DrawMesh(&g_plant_gpu_mesh, B3R_DebugMode_HalfFlatNormal);
+	
 	B3R_EndDrawing();
+	// --------------------------------------------
 
 	UI_DX11_EndFrame(&ui_outputs, g_dx11_framebuffer_view);
 	UI_OS_ApplyMouseControl(&g_window, ui_outputs.cursor);
@@ -473,14 +579,14 @@ static void InitGridMesh(B3R_WireMesh* mesh) {
 		UI_Color color;
 	};
 
-	UI_Color grid_color = UI_MakeColorF(0.3f, 0.3f, 0.3f, 0.5f);
+	UI_Color grid_color = UI_MakeColorF(1.f, 1.f, 1.f, 0.5f);
 	UI_Color x_axis_color = UI_MakeColorF(1.f, 0.2f, 0.2f, 0.8f);
 	UI_Color y_axis_color = UI_MakeColorF(0.15f, 1.f, 0.15f, 0.6f);
 
 	DS_DynArray(WireVertex) wire_verts = {&g_temp};
-	int grid_extent = 8;
+	int grid_extent = 5;
 
-	float cell_size = 1.f;
+	float cell_size = 0.1f;
 	HMM_Vec3 origin = {0, 0, 0};
 	HMM_Vec3 x_dir = {cell_size, 0, 0};
 	HMM_Vec3 y_dir = {0, cell_size, 0};
@@ -509,8 +615,8 @@ static void InitGridMesh(B3R_WireMesh* mesh) {
 int main() {
 	InitApp();
 
-	g_camera.pos.Y = -5.f;
-	g_camera.pos.Z = 2.f;
+	g_camera.pos.Y = -0.5f;
+	g_camera.pos.Z = 0.2f;
 
 	DS_ArenaInit(&g_plant_arena, 256, DS_HEAP);
 
@@ -518,6 +624,8 @@ int main() {
 	
 	g_imported_mesh_leaf = ImportMesh(&g_persist, "../resources/leaf_with_morph_targets.glb");
 	g_imported_mesh_bud = ImportMesh(&g_persist, "../resources/bud.glb");
+	
+	g_mesh_skybox = ImportSimpleGPUMesh("../resources/skybox.glb");
 
 	while (!OS_WINDOW_ShouldClose(&g_window)) {
 		Input_OS_Events input_events;
@@ -530,6 +638,7 @@ int main() {
 		UpdateAndRender();
 	}
 
+	DeinitSimpleGPUMesh(&g_mesh_skybox);
 	B3R_WireMeshDeinit(&g_grid_mesh);
 	DS_ArenaDeinit(&g_plant_arena);
 

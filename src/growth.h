@@ -16,22 +16,28 @@ struct Plant {
 };
 
 struct PlantParameters {
-	float points_per_meter = 10.f;
-	float age = 1.f; // age in years
+	float points_per_meter = 30.f;
+	float age = 0.4f; // age in years
 	float pitch_twist = 10.f; // total pitch twist per meter in degrees
 	float yaw_twist = 10.f; // total yaw twist per meter in degrees
-	float drop_pitch = 45.f;
-	//float pitch_rotate
+	float drop_pitch = 50.f;
 };
 
-static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, float age, float thickness, const PlantParameters* params) {
+static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, float age, bool is_leaf, const PlantParameters* params) {
 	Stem stem{};
 	DS_ArrInit(&stem.points, plant->arena);
+
+	stem.end_leaf_expand = 0.f;
+	if (is_leaf) {
+		stem.end_leaf_expand = HMM_MIN(age*5.f, 1.f);
+	}
 
 	// sometimes, the growth direction can change. But it should usually tend back towards the optimal growth direction.
 	HMM_Vec3 optimal_growth_direction = {0, 0, 1}; // this is the direction where the most sunlight comes from.
 
-	float desired_length = age;
+	float clamped_age = age; // limit the age of leaves
+	if (is_leaf) clamped_age = HMM_MIN(clamped_age, 0.02f); // limit the growth (thickness + length) of leaves
+	float desired_length = clamped_age;
 
 	HMM_Vec3 end_point = base_point;
 	HMM_Quat end_rotation = base_rotation;
@@ -57,7 +63,7 @@ static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, f
 	// At any point, anywhere in the tree, a new apical bud may start growing. A new one will most likely start growing out from an already active apical bud. But it could spawn anywhere (most likely into a "juicy" spot).
 	// hmm... so a new apical bud most likely starts growing at the top.
 
-	const float drop_density = 0.5f;
+	const float drop_density = 0.1f;
 
 	float distance_since_last_bud = 0.f;
 
@@ -67,27 +73,31 @@ static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, f
 		if (is_last) {
 			step_size = desired_length - end_point_t;
 		}
+		
+		float point_age = clamped_age * (1.f - end_point_t / desired_length);
+
+		float this_thickness = HMM_Lerp(0.0015f, HMM_MIN(point_age, 1.f), 0.005f); // quick test
 
 		// drop a new leaf and a new stem from the bud?
-		if (distance_since_last_bud > drop_density) {
+		if (!is_leaf && distance_since_last_bud > drop_density && point_age > 0.f) {
 			// rotate the new stem (pitch).
 			float golden_ratio_rad_increment = 1.61803398875f * 3.1415926f * 2.f;
 
+			// The drop pitch generally starts out as 0 and as the apical meristem grows in width, it pushes it out and the pitch increases.
+			// Also, as the new stem grows and becomes more heavy, the pitch increases further.
+			float drop_pitch = params->drop_pitch * HMM_MIN(point_age * 2.f, 1.f);
+
 			HMM_Quat new_stem_rot = {0, 0, 0, 1};
-			new_stem_rot = HMM_QFromAxisAngle_RH({1.f, 0.f, 0.f}, HMM_AngleDeg(params->drop_pitch)) * new_stem_rot;
+			new_stem_rot = HMM_QFromAxisAngle_RH({1.f, 0.f, 0.f}, HMM_AngleDeg(drop_pitch)) * new_stem_rot;
 			new_stem_rot = HMM_QFromAxisAngle_RH({0.f, 0.f, 1.f}, HMM_AngleRad(end_point_drop_yaw)) * new_stem_rot;
 			new_stem_rot = end_rotation * new_stem_rot;
 
-			float end_point_reached_this_point_at_approx_age = age * end_point_t / desired_length;
-			float new_stem_age = age - end_point_reached_this_point_at_approx_age;
-			if (new_stem_age > 0.f) {
-				AddStem(plant, end_point, new_stem_rot, new_stem_age * 0.5f, thickness * 0.5f, params);
+			AddStem(plant, end_point, new_stem_rot, point_age * 0.5f, true, params);
 				
-				end_point_drop_yaw += golden_ratio_rad_increment;
-			}
+			end_point_drop_yaw += golden_ratio_rad_increment;
 		}
 
-		DS_ArrPush(&stem.points, {end_point, thickness, end_rotation});
+		DS_ArrPush(&stem.points, {end_point, this_thickness, end_rotation});
 
 		HMM_Quat pitch_step_rotator = HMM_QFromAxisAngle_RH({1.f, 0.f, 0.f}, HMM_AngleDeg(params->pitch_twist) * step_size);
 		HMM_Quat yaw_step_rotator = HMM_QFromAxisAngle_RH({0.f, 0.f, 1.f}, HMM_AngleDeg(params->yaw_twist) * step_size);
@@ -98,8 +108,6 @@ static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, f
 
 		HMM_Vec3 end_up_direction = HMM_RotateV3({0, 0, 1}, end_rotation);
 
-		// a "growth source" is a place where multiple leaves can grow from.
-
 		// so the end point can split at any time into a new growth source. This is the most likely place for new growth sources.
 
 		// rotate growth direction randomly using simplex noise?
@@ -108,7 +116,7 @@ static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, f
 		distance_since_last_bud += step_size;
 
 		if (is_last) {
-			DS_ArrPush(&stem.points, {end_point, thickness, end_rotation});
+			DS_ArrPush(&stem.points, {end_point, this_thickness, end_rotation});
 			break;
 		}
 	}
@@ -122,7 +130,7 @@ static Plant GeneratePlant(DS_Arena* arena, const PlantParameters* params) {
 	DS_ArrInit(&plant.stems, arena);
 
 	float desired_length = params->age;
-	AddStem(&plant, {0, 0, 0}, {0, 0, 0, 1}, desired_length, 0.02f, params);
+	AddStem(&plant, {0, 0, 0}, {0, 0, 0, 1}, desired_length, false, params);
 
 	return plant;
 }

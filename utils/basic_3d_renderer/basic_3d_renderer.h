@@ -11,8 +11,8 @@
 
 typedef enum B3R_VertexLayout {
 	B3R_VertexLayout_Position,            // { vec3 position; }
-	//B3R_VertexLayout_PositionNormal,      // { vec3 position; vec3 normal; }
-	B3R_VertexLayout_PositionNormalColor, // { vec3 position; vec3 normal; }
+	//B3R_VertexLayout_PositionNormal,    // { vec3 position; vec3 normal; }
+	B3R_VertexLayout_PosNorUVCol, // { float x, y, z; float nx, ny, nz; float u, v; u32 rgba; }
 	B3R_VertexLayout_COUNT,
 } B3R_VertexLayout;
 
@@ -126,8 +126,9 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n	
 \n	struct VertexData {
 \n		float3 position : POS;
-\n	#if defined(B3R_LAYOUT_POSITION_NORMAL_COLOR)
+\n	#if defined(B3R_VERT_LAYOUT_POSNORUVCOL)
 \n		float3 normal   : NOR;
+\n		float2 uv       : UV;
 \n		float4 color    : COL;
 \n	#endif
 \n	};
@@ -135,8 +136,9 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n	struct PixelData {
 \n		float4 position    : SV_POSITION;
 \n		float3 position_ws : POS;
-\n	#if defined(B3R_LAYOUT_POSITION_NORMAL_COLOR)
+\n	#if defined(B3R_VERT_LAYOUT_POSNORUVCOL)
 \n		float3 normal      : NOR;
+\n		float2 uv          : UV;
 \n		float4 color       : COL;
 \n	#endif
 \n	};
@@ -146,8 +148,9 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n		output.position = mul(clip_from_world, float4(vertex.position, 1));
 \n		output.position.y *= -1.;
 \n		output.position_ws = vertex.position;
-\n	#if defined(B3R_LAYOUT_POSITION_NORMAL_COLOR)
+\n	#if defined(B3R_VERT_LAYOUT_POSNORUVCOL)
 \n		output.normal = vertex.normal;
+\n		output.uv = vertex.uv;
 \n		output.color = vertex.color;
 \n	#endif
 \n		return output;
@@ -176,7 +179,7 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n	
 \n	
 \n	float4 PSMain(PixelData pixel) : SV_TARGET {
-\n	#if defined(B3R_LAYOUT_POSITION_NORMAL_COLOR)
+\n	#if defined(B3R_VERT_LAYOUT_POSNORUVCOL)
 \n		float3 n = pixel.normal;
 \n	#else
 \n		float3 n = normalize(cross(ddy(pixel.position_ws), ddx(pixel.position_ws)));
@@ -187,7 +190,7 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n				float3 flat_n = normalize(cross(ddy(pixel.position_ws), ddx(pixel.position_ws)));
 \n				return debug_mode == 3 ? float4(flat_n*0.5 + 0.5, 1) : float4(flat_n, 1);
 \n			}
-\n	#if defined(B3R_LAYOUT_POSITION_NORMAL_COLOR)
+\n	#if defined(B3R_VERT_LAYOUT_POSNORUVCOL)
 \n			if (debug_mode == 4 || debug_mode == 5) { // vertex normal or half vertex normal
 \n				return debug_mode == 5 ? float4(pixel.normal*0.5 + 0.5, 1) : float4(pixel.normal, 1);
 \n			}
@@ -198,7 +201,7 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n			}
 \n		}
 \n
-\n	#if defined(B3R_LAYOUT_POSITION_NORMAL_COLOR)
+\n	#if defined(B3R_VERT_LAYOUT_POSNORUVCOL)
 \n		//float3 n = normalize(cross(pos_ddy, pos_ddx));
 \n		//return float4(n, 1);
 \n		float lightness = dot(n, normalize(float3(1, 1, 1)))*0.5 + 0.5;
@@ -300,8 +303,8 @@ static void B3R_Init(ID3D11Device* device) {
 	for (int i = 0; i < B3R_VertexLayout_COUNT; i++) {
 		ID3DBlob* vs_blob;
 		D3D_SHADER_MACRO macros[2] = {0};
-		if (i == B3R_VertexLayout_PositionNormalColor) {
-			macros[0].Name = "B3R_LAYOUT_POSITION_NORMAL_COLOR";
+		if (i == B3R_VertexLayout_PosNorUVCol) {
+			macros[0].Name = "B3R_VERT_LAYOUT_POSNORUVCOL";
 			macros[0].Definition = "1";
 		}
 
@@ -330,15 +333,16 @@ static void B3R_Init(ID3D11Device* device) {
 			input_elems_count = 1;
 			vertex_size = sizeof(float)*3;
 		}
-		else if (i == B3R_VertexLayout_PositionNormalColor) {
+		else if (i == B3R_VertexLayout_PosNorUVCol) {
 			static const D3D11_INPUT_ELEMENT_DESC input_elem_desc[] = {
 				{"POS", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
 				{"NOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
-				{"COL", 0, DXGI_FORMAT_R8G8B8A8_UNORM,  0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0},
+				{"UV",  0, DXGI_FORMAT_R32G32_FLOAT,    0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0},
+				{"COL", 0, DXGI_FORMAT_R8G8B8A8_UNORM,  0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0},
 			};
 			input_elems = input_elem_desc;
-			input_elems_count = 3;
-			vertex_size = sizeof(float)*3 + sizeof(float)*3 + sizeof(uint32_t);
+			input_elems_count = 4;
+			vertex_size = sizeof(float)*3 + sizeof(float)*3 + sizeof(float)*2 + sizeof(uint32_t);
 		}
 		else assert(0);
 		

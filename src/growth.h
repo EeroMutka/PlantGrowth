@@ -16,8 +16,8 @@ struct Plant {
 };
 
 struct PlantParameters {
-	float points_per_meter = 30.f;
-	float age = 0.4f; // age in years
+	float points_per_meter = 100.f;
+	float age = 0.1f; // age in years
 	float pitch_twist = 10.f; // total pitch twist per meter in degrees
 	float yaw_twist = 10.f; // total yaw twist per meter in degrees
 	float drop_pitch = 50.f;
@@ -36,8 +36,12 @@ static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, f
 	HMM_Vec3 optimal_growth_direction = {0, 0, 1}; // this is the direction where the most sunlight comes from.
 
 	float clamped_age = age; // limit the age of leaves
-	if (is_leaf) clamped_age = HMM_MIN(clamped_age, 0.02f); // limit the growth (thickness + length) of leaves
-	float desired_length = clamped_age;
+	if (is_leaf) {
+		// leaves can have a max growth age
+		const float leaf_max_growth_age = 0.02f;
+		clamped_age = HMM_MIN(clamped_age, leaf_max_growth_age);
+	}
+	//float desired_length = clamped_age;
 
 	HMM_Vec3 end_point = base_point;
 	HMM_Quat end_rotation = base_rotation;
@@ -63,23 +67,40 @@ static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, f
 	// At any point, anywhere in the tree, a new apical bud may start growing. A new one will most likely start growing out from an already active apical bud. But it could spawn anywhere (most likely into a "juicy" spot).
 	// hmm... so a new apical bud most likely starts growing at the top.
 
-	const float drop_density = 0.1f;
+	const float drop_density = 0.01f;
 
 	float distance_since_last_bud = 0.f;
 
-	for (;;) {
-		float step_size = 1.f / params->points_per_meter;
-		bool is_last = end_point_t + step_size > desired_length;
-		if (is_last) {
-			step_size = desired_length - end_point_t;
-		}
-		
-		float point_age = clamped_age * (1.f - end_point_t / desired_length);
+	int num_points = (int)(clamped_age*100.f);
+	if (num_points < 2) num_points = 2;
 
-		float this_thickness = HMM_Lerp(0.0015f, HMM_MIN(point_age, 1.f), 0.005f); // quick test
+	// so... how do we then make this smooth? ... the step size can't be constant.
+	float single_step_size = 0.1f;
+	float total_step_size = clamped_age * single_step_size;
+	float adjusted_single_step_size = total_step_size / (float)num_points;
+
+	// Ok, we don't actually need to increase the segment lengths. We can instead bias the total growth age.
+
+	for (int i = 0; i < num_points; i++) {
+		float step_size = adjusted_single_step_size;
+
+		//float step_size = 1.f / params->points_per_meter;
+		//bool is_last = end_point_t + step_size > desired_length;
+		//if (is_last) {
+		//step_size = desired_length - end_point_t;
+		//}
+		
+		float point_age = clamped_age * (1.f - (float)i / ((float)num_points - 1.f));
+		//float point_age = clamped_age * (1.f - end_point_t / desired_length);
+		//float this_thickness = HMM_Lerp(0.0015f, HMM_MIN(point_age, 1.f), 0.005f); // quick test
+		float this_thickness = HMM_Lerp(0.0015f, point_age, 0.005f); // quick test
+
+		step_size *= point_age;
+		
+		// so... the cells still keep growing and extending... so actually the step size depends on the thickness!
 
 		// drop a new leaf and a new stem from the bud?
-		if (!is_leaf && distance_since_last_bud > drop_density && point_age > 0.f) {
+		if (false && distance_since_last_bud > drop_density && point_age > 0.f) {
 			// rotate the new stem (pitch).
 			float golden_ratio_rad_increment = 1.61803398875f * 3.1415926f * 2.f;
 
@@ -93,8 +114,9 @@ static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, f
 			new_stem_rot = end_rotation * new_stem_rot;
 
 			AddStem(plant, end_point, new_stem_rot, point_age * 0.5f, true, params);
-				
+			
 			end_point_drop_yaw += golden_ratio_rad_increment;
+			distance_since_last_bud = 0.f;
 		}
 
 		DS_ArrPush(&stem.points, {end_point, this_thickness, end_rotation});
@@ -115,12 +137,13 @@ static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, f
 		end_point_t += step_size;
 		distance_since_last_bud += step_size;
 
-		if (is_last) {
-			DS_ArrPush(&stem.points, {end_point, this_thickness, end_rotation});
-			break;
-		}
+		//if (is_last) {
+		//	DS_ArrPush(&stem.points, {end_point, this_thickness, end_rotation});
+		//	break;
+		//}
 	}
 	
+	assert(stem.points.length >= 2);
 	DS_ArrPush(&plant->stems, stem);
 }
 

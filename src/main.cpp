@@ -441,7 +441,7 @@ static void UpdateAndRender() {
 	UI_DX11_BeginFrame();
 	UI_BeginFrame(&ui_inputs, g_window_size);
 
-	UI_Box* root = UI_MakeRootBox(UI_KEY(), 250.f, UI_SizeFit(), UI_BoxFlag_DrawOpaqueBackground|UI_BoxFlag_DrawBorder|UI_BoxFlag_ChildPadding);
+	UI_Box* root = UI_MakeRootBox(UI_KEY(), 300.f, UI_SizeFit(), UI_BoxFlag_DrawOpaqueBackground|UI_BoxFlag_DrawBorder|UI_BoxFlag_ChildPadding);
 	UI_PushBox(root);
 
 	PlantParameters plant_params_old;
@@ -449,9 +449,17 @@ static void UpdateAndRender() {
 
 	UI_AddFmt(UI_KEY(), "Points per meter: %!f", &g_plant_params.points_per_meter);
 	UI_AddFmt(UI_KEY(), "Age: %!f", &g_plant_params.age);
+	UI_AddFmt(UI_KEY(), "Leaf age ratio: %!f", &g_plant_params.leaf_age_ratio);
+	UI_AddFmt(UI_KEY(), "Leaf age deceler: %!f", &g_plant_params.leaf_age_deceler);
+	UI_AddFmt(UI_KEY(), "Drop frequency: %!f", &g_plant_params.drop_frequency);
 	UI_AddFmt(UI_KEY(), "Pitch twist: %!f", &g_plant_params.pitch_twist);
 	UI_AddFmt(UI_KEY(), "Yaw twist: %!f", &g_plant_params.yaw_twist);
 	UI_AddFmt(UI_KEY(), "Drop pitch: %!f", &g_plant_params.drop_pitch);
+	UI_AddFmt(UI_KEY(), "Drop pitch deceler: %!f", &g_plant_params.drop_pitch_deceler);
+	UI_AddFmt(UI_KEY(), "Apical growth: %!f", &g_plant_params.apical_growth);
+	UI_AddFmt(UI_KEY(), "Equal growth: %!f", &g_plant_params.equal_growth);
+	UI_AddFmt(UI_KEY(), "Equal growth deceler: %!f", &g_plant_params.equal_growth_deceler);
+	UI_AddFmt(UI_KEY(), "Leaf growth speed: %!f", &g_plant_params.leaf_growth_speed);
 
 	UI_PopBox(root);
 

@@ -18,10 +18,31 @@ struct Plant {
 struct PlantParameters {
 	float points_per_meter = 100.f;
 	float age = 0.5f; // age in years
+	float leaf_age_ratio = 1.f;
+	float leaf_age_deceler = 0.6f;
+	float drop_frequency = 0.03f;
 	float pitch_twist = 50.f;
 	float yaw_twist = 50.f;
 	float drop_pitch = 50.f;
+	float drop_pitch_deceler = 0.2f;
+	float apical_growth = 0.0f;
+	float equal_growth = 1.f;
+	float equal_growth_deceler = 0.3f;
+	float leaf_growth_speed = 0.3f;
 };
+
+// Decelerate the function `y = x` with the strength of `f`.
+// The result comes to a full stop at `x = 1 / f` when `f > 0`.
+// https://www.desmos.com/calculator/ncskawbzlg
+static float Decelerate(float x, float f) {
+	if (f > 0.f) {
+		float f_inv = 1.f / f;
+		float a = HMM_MIN(x, f_inv) / f_inv - 1.f;
+		float a2 = a*a;
+		return 0.25f * f_inv * (1.f - a2*a2);
+	}
+	return x;
+}
 
 static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, float age, bool is_leaf, const PlantParameters* params) {
 	Stem stem{};
@@ -29,7 +50,9 @@ static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, f
 
 	stem.end_leaf_expand = 0.f;
 	if (is_leaf) {
-		stem.end_leaf_expand = HMM_MIN(age*5.f, 1.f);
+		// The following slowly approaches 1
+		stem.end_leaf_expand = Decelerate(age, params->leaf_growth_speed) * params->leaf_growth_speed * 4.f;
+		if (stem.end_leaf_expand == 0.f) stem.end_leaf_expand = 0.00001f;
 	}
 
 	// sometimes, the growth direction can change. But it should usually tend back towards the optimal growth direction.
@@ -37,18 +60,12 @@ static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, f
 
 	float clamped_age = age; // limit the age of leaves
 	if (is_leaf) {
-		// leaves can have a max growth age
-		const float leaf_max_growth_age = 0.3f;
-		clamped_age = HMM_MIN(clamped_age, leaf_max_growth_age);
+		clamped_age = Decelerate(clamped_age, params->leaf_age_deceler);
 	}
-	//float desired_length = clamped_age;
 
 	HMM_Vec3 end_point = base_point;
 	HMM_Quat end_rotation = base_rotation;
 	float end_point_drop_yaw = 0.f; // rotate the yaw by golden ratio each time a new leaf is dropped by the bud
-
-	// We want to simulate the apical bud! Ok so we always have an apical bud (a 3d mesh).
-	// We also match the leaf mesh to fit the apical bud exactly, so that the transition from an apical bud into a leaf is perfectly seamless.
 
 	// Weird things:
 	// - why aren't all stems growing equally fast?
@@ -66,8 +83,6 @@ static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, f
 	// At any point, anywhere in the tree, a new apical bud may start growing. A new one will most likely start growing out from an already active apical bud. But it could spawn anywhere (most likely into a "juicy" spot).
 	// hmm... so a new apical bud most likely starts growing at the top.
 
-	const float drop_frequency = 0.03f;
-
 	float last_bud_t = 0.f;
 
 	float default_step_dt = 0.02f; // we decide some default step size
@@ -77,7 +92,7 @@ static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, f
 
 	//float total_step_size = (float)num_points * single_step_size;
 	float last_step_duration_ratio = (clamped_age - ((float)num_segments - 1) * default_step_dt) / default_step_dt;
-	printf("last_step_size: %f\n", last_step_duration_ratio);
+	//printf("last_step_size: %f\n", last_step_duration_ratio);
 
 	// Ok, we don't actually need to increase the segment lengths. We can instead bias the total growth age.
 
@@ -88,45 +103,40 @@ static void AddStem(Plant* plant, HMM_Vec3 base_point, HMM_Quat base_rotation, f
 		float step_duration_ratio = i == num_segments - 1 ? last_step_duration_ratio : 1.f;
 		
 		float step_dt = default_step_dt * step_duration_ratio;
-		float step_length = 0.f * step_dt;
+		float step_length = params->apical_growth * step_dt;
 		
 		float segment_start_point_t = default_step_dt * (float)i;
 		float segment_start_point_age = clamped_age - segment_start_point_t;
 
-		// hmm... so the last point spawn time seems to be incorrect!
+		float segment_end_point_t = segment_start_point_t + step_dt;
+		float segment_end_point_age = clamped_age - segment_end_point_t;
+			
+		step_length += params->equal_growth * Decelerate(segment_end_point_age, params->equal_growth_deceler) * step_dt;
+
 		if (is_valid_segment) {
 			
-			// hmm.... we need ot use the segment end point spawn time for multiplying the step length.
-			float segment_end_point_t = segment_start_point_t + step_dt;
-			float segment_end_point_age = clamped_age - segment_end_point_t;
-			step_length += segment_end_point_age * step_dt;
-			
-			// so when it's a very tiny last step, we want to not extend the step length at all.
-		
-			// so... the cells still keep growing and extending... so actually the step size depends on the thickness!
-
 			// drop a new leaf and a new stem from the bud?
-			if (!is_leaf && segment_start_point_t - last_bud_t > drop_frequency) {
+			if (!is_leaf && segment_start_point_t - last_bud_t > params->drop_frequency) {
 				// rotate the new stem (pitch).
 				float golden_ratio_rad_increment = 1.61803398875f * 3.1415926f * 2.f;
 			
 				// The drop pitch generally starts out as 0 and as the apical meristem grows in width, it pushes it out and the pitch increases.
 				// Also, as the new stem grows and becomes more heavy, the pitch increases further.
-				float drop_pitch = params->drop_pitch * HMM_MIN(segment_start_point_age * 2.f, 1.f);
+				float drop_pitch = params->drop_pitch * Decelerate(segment_start_point_age, params->drop_pitch_deceler); //params->drop_pitch * HMM_MIN(segment_start_point_age * 2.f, 1.f);
 			
 				HMM_Quat new_stem_rot = {0, 0, 0, 1};
 				new_stem_rot = HMM_QFromAxisAngle_RH({1.f, 0.f, 0.f}, HMM_AngleDeg(drop_pitch)) * new_stem_rot;
 				new_stem_rot = HMM_QFromAxisAngle_RH({0.f, 0.f, 1.f}, HMM_AngleRad(end_point_drop_yaw)) * new_stem_rot;
 				new_stem_rot = end_rotation * new_stem_rot;
 			
-				AddStem(plant, end_point, new_stem_rot, segment_start_point_age * 0.5f, true, params);
+				AddStem(plant, end_point, new_stem_rot, segment_start_point_age * params->leaf_age_ratio, true, params);
 			
 				end_point_drop_yaw += golden_ratio_rad_increment;
 				last_bud_t = segment_start_point_t;
 			}
 		}
 
-		float this_thickness = segment_start_point_age * 0.002f + 0.002f;
+		float this_thickness = step_length*0.1f + 0.001f;//segment_start_point_age * 0.002f + 0.002f;
 		DS_ArrPush(&stem.points, {end_point, this_thickness, end_rotation});
 		
 		if (is_valid_segment) {

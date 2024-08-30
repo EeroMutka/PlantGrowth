@@ -411,7 +411,7 @@ static void RegeneratePlantMesh() {
 		// Add a bud (or leaf) at the end.
 		StemPoint* last_point = DS_ArrPeekPtr(stem->points);
 		if (stem->end_leaf_expand > 0.f) {
-			MeshBuilderAddImportedMesh(&vertices, &indices, &g_imported_mesh_leaf, last_point->point, last_point->rotation, 1.f, stem->end_leaf_expand);
+			MeshBuilderAddImportedMesh(&vertices, &indices, &g_imported_mesh_leaf, last_point->point, last_point->rotation, 0.5f, stem->end_leaf_expand);
 		}
 		else {
 			MeshBuilderAddImportedMesh(&vertices, &indices, &g_imported_mesh_bud, last_point->point, last_point->rotation, 1.f, 0.f);
@@ -441,21 +441,28 @@ static void UpdateAndRender() {
 	UI_DX11_BeginFrame();
 	UI_BeginFrame(&ui_inputs, g_window_size);
 
-	UI_Box* root = UI_MakeRootBox(UI_KEY(), 300.f, UI_SizeFit(), UI_BoxFlag_DrawOpaqueBackground|UI_BoxFlag_DrawBorder|UI_BoxFlag_ChildPadding);
+	UI_Box* root = UI_MakeRootBox(UI_KEY(), 330.f, UI_SizeFit(), UI_BoxFlag_DrawOpaqueBackground|UI_BoxFlag_DrawBorder|UI_BoxFlag_ChildPadding);
 	UI_PushBox(root);
 
 	PlantParameters plant_params_old;
 	memcpy(&plant_params_old, &g_plant_params, sizeof(PlantParameters)); // use memcpy to copy any compiler-introduced padding bytes as well
 
-	UI_AddFmt(UI_KEY(), "Points per meter: %!f", &g_plant_params.points_per_meter);
+	UI_AddFmt(UI_KEY(), "Step size: %!f", &g_plant_params.step_size);
 	UI_AddFmt(UI_KEY(), "Age: %!f", &g_plant_params.age);
-	UI_AddFmt(UI_KEY(), "Leaf age ratio: %!f", &g_plant_params.leaf_age_ratio);
-	UI_AddFmt(UI_KEY(), "Leaf age deceler: %!f", &g_plant_params.leaf_age_deceler);
+	UI_AddFmt(UI_KEY(), "Growth scale: %!f", &g_plant_params.growth_scale);
+	UI_AddFmt(UI_KEY(), "Growth speed: %!f", &g_plant_params.growth_speed);
+	UI_AddFmt(UI_KEY(), "Thickness: %!f", &g_plant_params.thickness);
+	//UI_AddFmt(UI_KEY(), "Leaf age deceler: %!f", &g_plant_params.leaf_age_deceler);
 	UI_AddFmt(UI_KEY(), "Drop frequency: %!f", &g_plant_params.drop_frequency);
+	UI_AddFmt(UI_KEY(), "Drop leaf growth ratio: %!f", &g_plant_params.drop_leaf_growth_ratio);
+	UI_AddFmt(UI_KEY(), "Drop apical growth ratio: %!f", &g_plant_params.drop_apical_growth_ratio);
+	UI_AddFmt(UI_KEY(), "Axillary drop frequency: %!f", &g_plant_params.axillary_drop_frequency);
+	UI_AddFmt(UI_KEY(), "Axillary price: %!f", &g_plant_params.axillary_price);
+	UI_AddFmt(UI_KEY(), "Axillary drop pitch: %!f", &g_plant_params.axillary_drop_pitch);
 	UI_AddFmt(UI_KEY(), "Pitch twist: %!f", &g_plant_params.pitch_twist);
 	UI_AddFmt(UI_KEY(), "Yaw twist: %!f", &g_plant_params.yaw_twist);
-	UI_AddFmt(UI_KEY(), "Drop pitch: %!f", &g_plant_params.drop_pitch);
-	UI_AddFmt(UI_KEY(), "Drop pitch deceler: %!f", &g_plant_params.drop_pitch_deceler);
+	UI_AddFmt(UI_KEY(), "Leaf drop pitch: %!f", &g_plant_params.leaf_drop_pitch);
+	UI_AddFmt(UI_KEY(), "Leaf drop pitch speed: %!f", &g_plant_params.leaf_drop_pitch_speed);
 	UI_AddFmt(UI_KEY(), "Apical growth: %!f", &g_plant_params.apical_growth);
 	UI_AddFmt(UI_KEY(), "Equal growth: %!f", &g_plant_params.equal_growth);
 	UI_AddFmt(UI_KEY(), "Equal growth deceler: %!f", &g_plant_params.equal_growth_deceler);
@@ -476,7 +483,7 @@ static void UpdateAndRender() {
 	UI_Outputs ui_outputs;
 	UI_EndFrame(&ui_outputs);
 	
-	FLOAT clearcolor[4] = { 89.f/255.f, 189.f/255.f, 255.f/255.f, 1.f };
+	FLOAT clearcolor[4] = { 0.f, 0.f, 0.f, 1.f };
 	g_dx11_device_context->ClearRenderTargetView(g_dx11_framebuffer_view, clearcolor);
 	g_dx11_device_context->ClearDepthStencilView(g_dx11_depthbuffer_view, D3D11_CLEAR_DEPTH, 1.0f, 0);
 	
@@ -609,9 +616,9 @@ static void InitGridMesh(B3R_WireMesh* mesh) {
 		UI_Color color;
 	};
 
-	UI_Color grid_color = UI_MakeColorF(1.f, 1.f, 1.f, 0.5f);
-	UI_Color x_axis_color = UI_MakeColorF(1.f, 0.2f, 0.2f, 0.8f);
-	UI_Color y_axis_color = UI_MakeColorF(0.15f, 1.f, 0.15f, 0.6f);
+	UI_Color grid_color = UI_MakeColorF(169.f/255.f, 181.f/255.f, 185.f/255.f, 1.f);
+	UI_Color x_axis_color = UI_MakeColorF(1.f, 0.2f, 0.2f, 1.f);
+	UI_Color y_axis_color = UI_MakeColorF(0.15f, 1.f, 0.15f, 1.f);
 
 	DS_DynArray(WireVertex) wire_verts = {&g_temp};
 	int grid_extent = 5;
@@ -653,8 +660,8 @@ static void TextureInitFromFile(B3R_Texture* texture, const char* filepath) {
 int main() {
 	InitApp();
 
-	g_camera.pos.Y = -0.5f;
-	g_camera.pos.Z = 0.2f;
+	g_camera.pos.Y = -0.6f;
+	g_camera.pos.Z = 0.3f;
 
 	DS_ArenaInit(&g_plant_arena, 256, DS_HEAP);
 
@@ -663,8 +670,8 @@ int main() {
 	g_imported_mesh_leaf = ImportMesh(&g_persist, "../resources/leaf_with_morph_targets.glb");
 	g_imported_mesh_bud = ImportMesh(&g_persist, "../resources/bud.glb");
 	
-	MeshInitFromFile(&g_mesh_skybox, "../resources/skybox.glb");
-	TextureInitFromFile(&g_texture_skybox, "../resources/skybox_texture.png");
+	MeshInitFromFile(&g_mesh_skybox, "../resources/skysphere.glb");
+	TextureInitFromFile(&g_texture_skybox, "../resources/skysphere_texture.png");
 
 	while (!OS_WINDOW_ShouldClose(&g_window)) {
 		Input_OS_Events input_events;

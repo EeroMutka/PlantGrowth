@@ -469,8 +469,6 @@ static void RegeneratePlantMesh() {
 }
 
 static void UpdateAndRender() {
-	DS_ArenaReset(&g_temp);
-
 	Camera_Update(&g_camera, &g_inputs, 0.002f, 0.001f, 70.f, g_window_size.x / g_window_size.y, 0.01f, 1000.f);
 
 	GizmosViewport vp = {0};
@@ -535,7 +533,7 @@ static void UpdateAndRender() {
 	if (Input_WentDownOrRepeat(&g_inputs, Input_Key_Space)) {
 		PlantDoGrowthIteration(&g_plant, &g_plant_params, &g_temp);
 		RegeneratePlantMesh();
-		RegeneratePlantShadowMapMesh(&g_plant);
+		//RegeneratePlantShadowMapMesh(&g_plant);
 	}
 //	bool regen_plant = memcmp(&plant_params_old, &g_plant_params, sizeof(PlantParameters)) != 0 || !g_has_plant_mesh;
 //	if (regen_plant) {
@@ -748,6 +746,8 @@ int main() {
 	//TextureInitFromFile(&g_texture_skybox, "../resources/skysphere_texture.png");
 
 	while (!OS_WINDOW_ShouldClose(&g_window)) {
+		DS_ArenaReset(&g_temp);
+
 		Input_OS_Events input_events;
 		Input_OS_BeginEvents(&input_events, &g_inputs, &g_temp);
 		for (OS_WINDOW_Event event; OS_WINDOW_PollEvent(&g_window, &event, OnResizeWindow, NULL);) {

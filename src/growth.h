@@ -216,11 +216,12 @@ static void StemGrow(Plant* plant, Stem* stem, float resources, DS_Arena* temp_a
 	// It's important to do this first to let the apical growth "steal" the optimal growth direction.
 
 	DS_DynArray(float) resources_per_segment = {temp_arena};
-
+	
 	float resources_left = resources;
-	float apical_control = 0.7f;
+	float apical_control = stem->segments.length > 15 ? 0.85f : 1.f;
+	// branch_age
 
-	for (int i = 0; i < stem->segments.length - 1; i++) {
+	for (int i = 0; i < old_segment_count - 1; i++) {
 		StemSegment segment = stem->segments.data[i];
 		
 		float v_main_weight = apical_control * segment.end_lightness_main;
@@ -265,12 +266,11 @@ static void StemGrow(Plant* plant, Stem* stem, float resources, DS_Arena* temp_a
 			if (stem->segments.length == 0 || DS_ArrPeek(stem->segments).scale_ratio + scale_ratio > 1.f) {
 				StemSegment new_segment{};
 				DS_ArrPush(&stem->segments, new_segment);
-				IncrementShadowValue(plant, shadow_p.x, shadow_p.y, shadow_p.z, 1);
-				IncrementShadowValueClampedSquare(plant, shadow_p.x, shadow_p.x, shadow_p.y, shadow_p.y, shadow_p.z-1, 1);
-				IncrementShadowValueClampedSquare(plant, shadow_p.x, shadow_p.x, shadow_p.y, shadow_p.y, shadow_p.z-2, 1);
-				IncrementShadowValueClampedSquare(plant, shadow_p.x - 1, shadow_p.x + 1, shadow_p.y - 1, shadow_p.y + 1, shadow_p.z-3, 1);
-				IncrementShadowValueClampedSquare(plant, shadow_p.x - 1, shadow_p.x + 1, shadow_p.y - 1, shadow_p.y + 1, shadow_p.z-4, 1);
-				//IncrementShadowValueClampedSquare(plant, shadow_p.x - 2, shadow_p.x + 2, shadow_p.y - 2, shadow_p.y + 2, shadow_p.z-4, 255);
+				IncrementShadowValue(plant, shadow_p.x, shadow_p.y, shadow_p.z, 5);
+				IncrementShadowValueClampedSquare(plant, shadow_p.x - 1, shadow_p.x + 1, shadow_p.y - 1, shadow_p.y + 1, shadow_p.z-1, 4);
+				IncrementShadowValueClampedSquare(plant, shadow_p.x - 2, shadow_p.x + 2, shadow_p.y - 2, shadow_p.y + 2, shadow_p.z-2, 3);
+				IncrementShadowValueClampedSquare(plant, shadow_p.x - 3, shadow_p.x + 3, shadow_p.y - 3, shadow_p.y + 3, shadow_p.z-3, 2);
+				IncrementShadowValueClampedSquare(plant, shadow_p.x - 4, shadow_p.x + 4, shadow_p.y - 4, shadow_p.y + 4, shadow_p.z-4, 1);
 			}
 
 			StemSegment* last_segment = DS_ArrPeekPtr(stem->segments);
@@ -331,7 +331,9 @@ static float PlantCalculateLight(Plant* plant, Stem* stem) {
 			ShadowMapPoint shadow_p = PointToShadowMapSpace(plant, segment->end_point);
 			uint8_t val = plant->shadow_volume[shadow_p.z*SHADOW_VOLUME_DIM*SHADOW_VOLUME_DIM + shadow_p.y*SHADOW_VOLUME_DIM + shadow_p.x];
 			
-			segment->end_lightness_lateral = 1.f - 200.f*(float)(val - 1.f) / 255.f;
+			segment->end_lightness_lateral = 1.f - ((float)val-1.f)/255.f;
+			segment->end_lightness_lateral = HMM_MAX(segment->end_lightness_lateral, 0.f);
+
 			segment->end_lightness_main = lightness_main + segment->end_lightness_lateral;
 		}
 
@@ -342,10 +344,11 @@ static float PlantCalculateLight(Plant* plant, Stem* stem) {
 }
 
 static void PlantDoGrowthIteration(Plant* plant, const PlantParameters* params, DS_Arena* temp_arena) {
-	float resource_scale = 1.f;
+	float resource_scale = 0.5f;
 	if (plant->base) {
 		float total_light = PlantCalculateLight(plant, plant->base);
-		StemGrow(plant, plant->base, resource_scale*total_light, temp_arena);
+		printf("total_light: %f\n", total_light);
+		StemGrow(plant, plant->base, total_light * resource_scale, temp_arena);
 	}
 	else {
 		HMM_Vec3 start_point = {0.5f/SHADOW_VOLUME_DIM, 0.5f/SHADOW_VOLUME_DIM, 0.5f/SHADOW_VOLUME_DIM};

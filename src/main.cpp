@@ -63,7 +63,10 @@ struct SimpleGPUMeshVertex {
 	HMM_Vec3 position;
 	HMM_Vec3 normal;
 	HMM_Vec2 uv;
-	uint8_t r, g, b, a; // vertex color
+	union {
+		struct { uint8_t r, g, b, a; };
+		uint32_t color_rgba;
+	};
 };
 
 struct ImportedMeshMorphTarget {
@@ -343,7 +346,7 @@ static void MeshBuilderAddQuad(MeshIndexList* list, uint32_t a, uint32_t b, uint
 	DS_ArrPush(list, a); DS_ArrPush(list, c); DS_ArrPush(list, d);
 }
 
-static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* indices, ImportedMesh* imported_mesh, HMM_Vec3 position, HMM_Quat rotation, float scale, float morph_amount)
+static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* indices, ImportedMesh* imported_mesh, HMM_Vec3 position, HMM_Quat rotation, float scale, float morph_amount, uint32_t color)
 {
 	ImportedMeshMorphTarget base_morph = DS_ArrGet(imported_mesh->vertices_morphs, 0);
 	
@@ -363,11 +366,7 @@ static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* 
 
 		vert.position = position + HMM_RotateV3(vert.position * scale, rotation);
 		vert.normal = HMM_RotateV3(vert.normal, rotation);
-
-		vert.r = 50;
-		vert.g = 150;
-		vert.b = 40;
-		vert.a = 255;
+		vert.color_rgba = color;
 		DS_ArrPush(vertices, vert);
 	}
 
@@ -389,7 +388,12 @@ static void RegeneratePlantShadowMapMesh(Plant* plant) {
 				uint8_t val = plant->shadow_volume[i];
 				if (val > 0) {
 					HMM_Vec3 pos = HMM_Vec3{(float)x + 0.5f, (float)y + 0.5f, (float)z + 0.5f} * voxel_size + HMM_Vec3{-0.5f, -0.5f, 0.f};
-					MeshBuilderAddImportedMesh(&vertices, &indices, &g_imported_mesh_unit_cube, pos, {0, 0, 0, 1}, voxel_size, 0.f);
+
+					int lightness = (int)val;
+					if (lightness > 255) lightness = 255;
+					
+					uint32_t rgba = (uint32_t)lightness | ((uint32_t)lightness << 8) | ((uint32_t)lightness << 16) | (0xFF << 24);
+					MeshBuilderAddImportedMesh(&vertices, &indices, &g_imported_mesh_unit_cube, pos, {0, 0, 0, 1}, 0.8f*voxel_size, 0.f, rgba);
 				}
 				i++;
 			}
@@ -529,7 +533,7 @@ static void UpdateAndRender() {
 	}
 
 	if (Input_WentDownOrRepeat(&g_inputs, Input_Key_Space)) {
-		PlantDoGrowthIteration(&g_plant, &g_plant_params);
+		PlantDoGrowthIteration(&g_plant, &g_plant_params, &g_temp);
 		RegeneratePlantMesh();
 		RegeneratePlantShadowMapMesh(&g_plant);
 	}

@@ -139,23 +139,24 @@ static STR ReadEntireFile(DS_Arena* arena, const char* file) {
 	return result;
 
 }
-static void DebugDrawPlant(const GizmosViewport* vp, Plant* plant) {
-	for (int i = 0; i < plant->all_stems.length; i++) {
-		Stem* stem = plant->all_stems.data[i];
 
-		HMM_Vec3 prev_p = stem->base_point;
-		for (int j = 0; j < stem->segments.length; j++) {
-			StemSegment* segment = &stem->segments.data[j];
-			DrawLine3D(vp, prev_p, segment->end_point, 5.f, UI_BLUE);
-			prev_p = segment->end_point;
-
-			//if (j > 0) {
-			//	StemPoint* prev_stem_point = &stem->points.data[j - 1];
-			//}
-			//DrawPoint3D(vp, stem_point->point, stem_point->thickness * 100.f, UI_BLUE);
-		}
-	}
-}
+//static void DebugDrawPlant(const GizmosViewport* vp, Plant* plant) {
+//	for (int i = 0; i < plant->all_buds.length; i++) {
+//		Bud* bud = plant->all_buds.data[i];
+//
+//		HMM_Vec3 prev_p = bud->base_point;
+//		for (int j = 0; j < bud->segments.length; j++) {
+//			StemSegment* segment = &bud->segments.data[j];
+//			DrawLine3D(vp, prev_p, segment->end_point, 5.f, UI_BLUE);
+//			prev_p = segment->end_point;
+//
+//			//if (j > 0) {
+//			//	StemPoint* prev_bud_point = &bud->points.data[j - 1];
+//			//}
+//			//DrawPoint3D(vp, bud_point->point, bud_point->thickness * 100.f, UI_BLUE);
+//		}
+//	}
+//}
 
 static bool ImportMeshAddMorph(DS_Arena* arena, ImportedMesh* result, cgltf_attribute* attributes, int attributes_count) {
 	HMM_Vec3* positions_data = NULL;
@@ -407,59 +408,54 @@ static void RegeneratePlantShadowMapMesh(Plant* plant) {
 	g_has_plant_shadow_map_mesh = true;
 }
 
+static void RegeneratePlantMeshStep(MeshVertexList* vertices, MeshIndexList* indices, Bud* bud) {
+	if (bud->segments.length == 0) return;
+
+	uint32_t prev_circle_first_vertex = 0;
+	for (int j = -1; j < bud->segments.length; j++) {
+		HMM_Vec3 base_point;
+		HMM_Vec3 local_x_dir, local_y_dir;
+		if (j == -1) {
+			StemSegment* segment = &bud->segments.data[0];
+			local_x_dir = HMM_RotateV3({1, 0, 0}, segment->end_rotation);
+			local_y_dir = HMM_RotateV3({0, 1, 0}, segment->end_rotation);
+			base_point = bud->base_point;
+		}
+		else {
+			StemSegment* segment = &bud->segments.data[j];
+			if (segment->end_lateral) {
+				RegeneratePlantMeshStep(vertices, indices, segment->end_lateral);
+			}
+
+			local_x_dir = HMM_RotateV3({1, 0, 0}, segment->end_rotation);
+			local_y_dir = HMM_RotateV3({0, 1, 0}, segment->end_rotation);
+			base_point = segment->end_point;
+		}
+
+		uint32_t first_vertex = (uint32_t)vertices->length;
+		int num_segments = 8;
+		for (int k = 0; k < num_segments; k++) {
+			float theta = 2.f * HMM_PI32 * (float)k / (float)num_segments;
+
+			HMM_Vec3 point_normal = local_x_dir * cosf(theta) + local_y_dir * sinf(theta);
+			HMM_Vec3 point = base_point + point_normal * 0.001f;
+
+			DS_ArrPush(vertices, {point, point_normal, {0, 0}, 50, 150, 40, 255});
+
+			if (j >= 0) {
+				int next_k = (k + 1) % 8;
+				MeshBuilderAddQuad(indices, prev_circle_first_vertex + k, prev_circle_first_vertex + next_k, first_vertex + next_k, first_vertex + k);
+			}
+		}
+
+		prev_circle_first_vertex = first_vertex;
+	}
+}
+
 static void RegeneratePlantMesh() {
 	MeshVertexList vertices = {&g_temp};
 	MeshIndexList indices = {&g_temp};
-
-	for (int i = 0; i < g_plant.all_stems.length; i++) {
-		Stem* stem = g_plant.all_stems.data[i];
-		if (stem->segments.length == 0) continue;
-		
-		uint32_t prev_circle_first_vertex = 0;
-		for (int j = -1; j < stem->segments.length; j++) {
-			HMM_Vec3 base_point;
-			HMM_Vec3 local_x_dir, local_y_dir;
-			if (j == -1) {
-				StemSegment* segment = &stem->segments.data[0];
-				local_x_dir = HMM_RotateV3({1, 0, 0}, segment->end_rotation);
-				local_y_dir = HMM_RotateV3({0, 1, 0}, segment->end_rotation);
-				base_point = stem->base_point;
-			}
-			else {
-				StemSegment* segment = &stem->segments.data[j];
-				local_x_dir = HMM_RotateV3({1, 0, 0}, segment->end_rotation);
-				local_y_dir = HMM_RotateV3({0, 1, 0}, segment->end_rotation);
-				base_point = segment->end_point;
-			}
-
-			uint32_t first_vertex = (uint32_t)vertices.length;
-			int num_segments = 8;
-			for (int k = 0; k < num_segments; k++) {
-				float theta = 2.f * HMM_PI32 * (float)k / (float)num_segments;
-				
-				HMM_Vec3 point_normal = local_x_dir * cosf(theta) + local_y_dir * sinf(theta);
-				HMM_Vec3 point = base_point + point_normal * 0.001f;
-
-				DS_ArrPush(&vertices, {point, point_normal, {0, 0}, 50, 150, 40, 255});
-				
-				if (j >= 0) {
-					int next_k = (k + 1) % 8;
-					MeshBuilderAddQuad(&indices, prev_circle_first_vertex + k, prev_circle_first_vertex + next_k, first_vertex + next_k, first_vertex + k);
-				}
-			}
-
-			prev_circle_first_vertex = first_vertex;
-		}
-		
-		// Add a bud (or leaf) at the end.
-		//StemPoint* last_point = DS_ArrPeekPtr(stem->points);
-		//if (stem->end_leaf_expand > 0.f) {
-		//	MeshBuilderAddImportedMesh(&vertices, &indices, &g_imported_mesh_leaf, last_point->point, last_point->rotation, 0.5f, stem->end_leaf_expand);
-		//}
-		//else {
-		//	MeshBuilderAddImportedMesh(&vertices, &indices, &g_imported_mesh_bud, last_point->point, last_point->rotation, 1.f, 0.f);
-		//}
-	}
+	RegeneratePlantMeshStep(&vertices, &indices, &g_plant.root);
 
 	if (g_has_plant_mesh) {
 		B3R_MeshDeinit(&g_plant_gpu_mesh);
@@ -521,13 +517,8 @@ static void UpdateAndRender() {
 	static bool first_frame = true;
 	if (Input_WentDownOrRepeat(&g_inputs, Input_Key_Delete) || first_frame) {
 		DS_ArenaReset(&g_plant_arena);
-		memset(&g_plant, 0, sizeof(g_plant));
-		DS_ArrInit(&g_plant.all_stems, &g_plant_arena);
-		g_plant.arena = &g_plant_arena;
-		g_plant.shadow_volume_half_extent = 0.5f;
+		PlantInit(&g_plant, &g_plant_arena);
 		first_frame = false;
-
-		g_has_plant_mesh = true;
 	}
 
 	if (Input_WentDownOrRepeat(&g_inputs, Input_Key_Space)) {

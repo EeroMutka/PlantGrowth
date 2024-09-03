@@ -48,8 +48,7 @@ struct Bud { // a bud can have grown into a branch, but we still call it a bud
 	HMM_Vec3 base_point;
 	HMM_Quat base_rotation;
 	DS_DynArray(StemSegment) segments;
-	//int order;
-
+	bool is_dead;
 	float next_bud_angle_rad; // incremented by golden ratio angle
 	//HMM_Vec3 current_direction;
 };
@@ -57,6 +56,7 @@ struct Bud { // a bud can have grown into a branch, but we still call it a bud
 struct StemSegment {
 	HMM_Vec3 end_point;
 	HMM_Quat end_rotation;
+	float width;
 	float end_lightness_main; // Q_m
 	float end_lightness_lateral; // Q_l
 
@@ -71,6 +71,7 @@ struct Plant {
 	DS_Arena* arena;
 	Bud root;
 
+	int age;
 	float shadow_volume_half_extent;
 	uint8_t shadow_volume[SHADOW_VOLUME_DIM*SHADOW_VOLUME_DIM*SHADOW_VOLUME_DIM]; // each voxel stores the number of buds inside it
 };
@@ -219,6 +220,7 @@ static void ApicalGrowth(Plant* plant, Bud* bud, float vigor) {
 
 	HMM_Vec3 old_dir = HMM_RotateV3({0, 0, 1}, bud_end_rotation);
 	HMM_Vec3 new_dir = HMM_LerpV3(old_dir, 0.2f, optimal_direction);
+	new_dir.Z -= 0.05f;
 	new_dir = HMM_NormV3(new_dir);
 
 	HMM_Quat rotator_to_new_dir = HMM_ShortestRotationBetweenUnitVectors(old_dir, new_dir, {0, 0, 1});
@@ -249,6 +251,7 @@ static void ApicalGrowth(Plant* plant, Bud* bud, float vigor) {
 			Bud* new_bud = DS_New(Bud, plant->arena);
 			new_bud->base_point = last_segment->end_point;
 			new_bud->base_rotation = new_bud_rot;
+			new_bud->next_bud_angle_rad = bud->next_bud_angle_rad + golden_ratio_rad_increment;
 			DS_ArrInit(&new_bud->segments, plant->arena);
 			
 			last_segment->end_lateral = new_bud;
@@ -259,8 +262,8 @@ static void ApicalGrowth(Plant* plant, Bud* bud, float vigor) {
 		new_segment.end_rotation = new_end_rotation;
 		DS_ArrPush(&bud->segments, new_segment);
 
-		IncrementShadowValueClampedSquare(plant, shadow_p.x - 1, shadow_p.x + 1, shadow_p.y - 1, shadow_p.y + 1, shadow_p.z-0, 5);
-		IncrementShadowValueClampedSquare(plant, shadow_p.x - 1, shadow_p.x + 1, shadow_p.y - 1, shadow_p.y + 1, shadow_p.z-1, 4);
+		IncrementShadowValueClampedSquare(plant, shadow_p.x - 1, shadow_p.x + 1, shadow_p.y - 1, shadow_p.y + 1, shadow_p.z-0, 8);
+		IncrementShadowValueClampedSquare(plant, shadow_p.x - 1, shadow_p.x + 1, shadow_p.y - 1, shadow_p.y + 1, shadow_p.z-1, 6);
 		IncrementShadowValueClampedSquare(plant, shadow_p.x - 2, shadow_p.x + 2, shadow_p.y - 2, shadow_p.y + 2, shadow_p.z-2, 3);
 		IncrementShadowValueClampedSquare(plant, shadow_p.x - 3, shadow_p.x + 3, shadow_p.y - 3, shadow_p.y + 3, shadow_p.z-3, 2);
 		IncrementShadowValueClampedSquare(plant, shadow_p.x - 4, shadow_p.x + 4, shadow_p.y - 4, shadow_p.y + 4, shadow_p.z-4, 1);
@@ -269,31 +272,66 @@ static void ApicalGrowth(Plant* plant, Bud* bud, float vigor) {
 
 // returns unused vigor
 static float BudGrow(Plant* plant, Bud* bud, float vigor, DS_Arena* temp_arena) {
-	float apical_control = 0.7f;// bud->segments.length > 8 ? 0.1f : 0.8f;
 
-	// if this is an ungrown bud, we want to add segments to it.
-
-	float vigor_left = vigor;
-	for (int i = 0; i < bud->segments.length - 1; i++) { // NOTE: the last segment may not ever have an active lateral bud!
-		StemSegment segment = bud->segments.data[i];
-		if (segment.end_lightness_lateral + segment.end_lightness_main == 0.f) break;
-		
-		float v_main_weight = apical_control * segment.end_lightness_main;
-		float v_lateral_weight = (1.f - apical_control) * segment.end_lightness_lateral;
-		float mult = vigor_left / (v_main_weight + v_lateral_weight);
-		float v_lateral = v_lateral_weight * mult;
-		vigor_left = v_main_weight * mult;
-		
-		vigor_left += BudGrow(plant, segment.end_lateral, v_lateral, temp_arena);
+	// shed the branch?
+	if (bud->segments.length > 0) {
+		float branch_lightness = bud->segments.data[0].end_lightness_main + bud->segments.data[0].end_lightness_lateral;
+		if ((float)bud->segments.length * 0.7 > branch_lightness) {
+			bud->is_dead = true;
+			DS_ArrClear(&bud->segments);
+		}
 	}
+	
+	if (!bud->is_dead) {
+		// let's try to model a birch accurately.
+		// so a birch for example.
+		// When young, the apex has full control.
+		// After it has a proper form, it starts dividing its resources equally among its main branches. The main branches are chosen as the
+		// few most promising buds. Other buds are ignored.
+		
+		// Let's calculate the average lightness and use this as a binary threshold for giving resources.
+		//float 
 
-	int v_main_floor = (int)vigor_left;
-	float vigor_per_step = v_main_floor / (float)v_main_floor;
-	for (int j = 0; j < v_main_floor; j++) {
-		ApicalGrowth(plant, bud, vigor_per_step);
+		float apical_control = 0.5f;
+		//if (plant->age > 5) apical_control = 0.5f;
+
+		float avrg_lightness_lateral = 0.f;
+		float avrg_lightness_lateral_weight = 0.f;
+		if (plant->age > 20) { // the birch has reached its first form
+			for (int i = 0; i < bud->segments.length - 1; i++) {
+				StemSegment segment = bud->segments.data[i];
+				segment.end_lightness_lateral += avrg_lightness_lateral;
+				avrg_lightness_lateral_weight += 1.f;
+			}
+			avrg_lightness_lateral /= avrg_lightness_lateral_weight;
+		}
+
+		float vigor_left = vigor;
+		for (int i = 0; i < bud->segments.length - 1; i++) { // NOTE: the last segment may not ever have an active lateral bud!
+			StemSegment segment = bud->segments.data[i];
+			if (segment.end_lightness_lateral + segment.end_lightness_main == 0.f) break;
+			
+			// is this an active bud?
+			if (segment.end_lightness_lateral > avrg_lightness_lateral + 0.9f) {
+				float v_main_weight = apical_control * segment.end_lightness_main;
+				float v_lateral_weight = (1.f - apical_control) * segment.end_lightness_lateral;
+				float mult = vigor_left / (v_main_weight + v_lateral_weight);
+				float v_lateral = v_lateral_weight * mult;
+				vigor_left = v_main_weight * mult;
+		
+				vigor_left += BudGrow(plant, segment.end_lateral, v_lateral, temp_arena);
+			}
+		}
+
+		int v_main_floor = (int)vigor_left;
+		float vigor_per_step = v_main_floor / (float)v_main_floor;
+		for (int j = 0; j < v_main_floor; j++) {
+			ApicalGrowth(plant, bud, vigor_per_step);
+		}
+
+		return v_main_floor == 0 ? vigor_left : 0;
 	}
-
-	return v_main_floor == 0 ? vigor_left : 0;
+	return 0.f;
 }
 
 static float PlantCalculateLight(Plant* plant, Bud* bud) {
@@ -305,10 +343,25 @@ static float PlantCalculateLight(Plant* plant, Bud* bud) {
 	float lightness_main = 1.f - ((float)val-1.f)/255.f;
 	lightness_main = HMM_MAX(lightness_main, 0.f);
 
+	//const float bud_width = 0.0005f;
+	const float bud_width = 0.002f;
+	float width = bud_width;
+
 	for (int i = bud->segments.length - 1; i >= 0; i--) {
 		StemSegment* segment = &bud->segments.data[i];
 		segment->end_lightness_main = lightness_main;
-		segment->end_lightness_lateral = segment->end_lateral ? PlantCalculateLight(plant, segment->end_lateral) : 0.f;
+		segment->end_lightness_lateral = 0.f;
+
+		if (segment->end_lateral) {
+			segment->end_lightness_lateral = PlantCalculateLight(plant, segment->end_lateral);
+
+			float lateral_width = segment->end_lateral->segments.length > 0 ? segment->end_lateral->segments.data[0].width : bud_width;
+			//assert(lateral_width >= bud_width);
+			//width = sqrtf(width*width + lateral_width*lateral_width);
+			//width += lateral_width*1.f;
+		}
+
+		segment->width = width;
 		lightness_main += segment->end_lightness_lateral;
 	}
 	
@@ -326,10 +379,10 @@ static void PlantInit(Plant* plant, DS_Arena* arena) {
 }
 
 static void PlantDoGrowthIteration(Plant* plant, const PlantParameters* params, DS_Arena* temp_arena) {
-	//float vigor_scale = 1.f;
-
+	float vigor_scale = 1.5f;
 	float light = PlantCalculateLight(plant, &plant->root);
-	BudGrow(plant, &plant->root, 1.1f * light, temp_arena);
+	BudGrow(plant, &plant->root, vigor_scale * light, temp_arena);
+	plant->age++;
 
 	//if (plant->base) {
 	//	//float total_light = PlantCalculateLight(plant, plant->base);

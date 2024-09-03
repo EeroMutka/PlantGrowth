@@ -414,23 +414,20 @@ static void RegeneratePlantMeshStep(MeshVertexList* vertices, MeshIndexList* ind
 	uint32_t prev_circle_first_vertex = 0;
 	for (int j = -1; j < bud->segments.length; j++) {
 		HMM_Vec3 base_point;
-		HMM_Vec3 local_x_dir, local_y_dir;
+		StemSegment* segment;
 		if (j == -1) {
-			StemSegment* segment = &bud->segments.data[0];
-			local_x_dir = HMM_RotateV3({1, 0, 0}, segment->end_rotation);
-			local_y_dir = HMM_RotateV3({0, 1, 0}, segment->end_rotation);
+			segment = &bud->segments.data[0];
 			base_point = bud->base_point;
-		}
-		else {
-			StemSegment* segment = &bud->segments.data[j];
+		} else {
+			segment = &bud->segments.data[j];
 			if (segment->end_lateral) {
 				RegeneratePlantMeshStep(vertices, indices, segment->end_lateral);
 			}
-
-			local_x_dir = HMM_RotateV3({1, 0, 0}, segment->end_rotation);
-			local_y_dir = HMM_RotateV3({0, 1, 0}, segment->end_rotation);
 			base_point = segment->end_point;
 		}
+
+		HMM_Vec3 local_x_dir = HMM_RotateV3({1, 0, 0}, segment->end_rotation);
+		HMM_Vec3 local_y_dir = HMM_RotateV3({0, 1, 0}, segment->end_rotation);
 
 		uint32_t first_vertex = (uint32_t)vertices->length;
 		int num_segments = 8;
@@ -438,7 +435,7 @@ static void RegeneratePlantMeshStep(MeshVertexList* vertices, MeshIndexList* ind
 			float theta = 2.f * HMM_PI32 * (float)k / (float)num_segments;
 
 			HMM_Vec3 point_normal = local_x_dir * cosf(theta) + local_y_dir * sinf(theta);
-			HMM_Vec3 point = base_point + point_normal * 0.001f;
+			HMM_Vec3 point = base_point + point_normal * segment->width;
 
 			DS_ArrPush(vertices, {point, point_normal, {0, 0}, 50, 150, 40, 255});
 

@@ -27,6 +27,7 @@ struct RandomGenerator {
 	uint64_t state, inc;
 };
 
+
 uint32_t RandomU32(RandomGenerator* rng) {
 	// Minimal PCG32 code / (c) 2014 M.E. O'Neill / pcg-random.org
 	// Licensed under Apache License 2.0 (NO WARRANTY, etc. see website)
@@ -37,6 +38,14 @@ uint32_t RandomU32(RandomGenerator* rng) {
 	return (xorshifted >> rot) | (xorshifted << ((0 - rot) & 31));
 }
 
+static RandomGenerator RandomInit(uint64_t seed) {
+	RandomGenerator rng = {0, (seed << 1) | 1};
+	RandomU32(&rng);
+	rng.state += seed;
+	RandomU32(&rng);
+	return rng;
+}
+
 static float RandomFloat(RandomGenerator* rng, float min, float max) {
 	return min + (RandomU32(rng) / (float)UINT_MAX) * (max - min);
 }
@@ -44,11 +53,20 @@ static float RandomFloat(RandomGenerator* rng, float min, float max) {
 struct Bud;
 struct StemSegment;
 
+struct ShadowMapPoint {
+	int x, y, z;
+};
+
 struct Bud { // a bud can have grown into a branch, but we still call it a bud
+	uint32_t id;
 	HMM_Vec3 base_point;
 	HMM_Quat base_rotation;
+	ShadowMapPoint end_sample_point;
 	DS_DynArray(StemSegment) segments;
 	bool is_dead;
+	int order;
+	float total_lightness;
+	float max_lightness; // max lightness of any single bud
 	float next_bud_angle_rad; // incremented by golden ratio angle
 	//HMM_Vec3 current_direction;
 };
@@ -57,8 +75,9 @@ struct StemSegment {
 	HMM_Vec3 end_point;
 	HMM_Quat end_rotation;
 	float width;
-	float end_lightness_main; // Q_m
-	float end_lightness_lateral; // Q_l
+	float end_total_lightness;
+	//float end_lightness_lateral; // Q_l
+	//float max_end_lightness_lateral;
 
 	// for now, let's say that each segment (except the last one) ALWAYS has a lateral bud at the end.
 	// @speed: StemSegment could be optimized (removing one Vec3) by removing `base_point` and `base_rotation` from inside the Bud struct.
@@ -70,7 +89,7 @@ struct StemSegment {
 struct Plant {
 	DS_Arena* arena;
 	Bud root;
-
+	uint32_t next_bud_id;
 	int age;
 	float shadow_volume_half_extent;
 	uint8_t shadow_volume[SHADOW_VOLUME_DIM*SHADOW_VOLUME_DIM*SHADOW_VOLUME_DIM]; // each voxel stores the number of buds inside it
@@ -104,10 +123,6 @@ static void IncrementShadowValueClampedSquare(Plant* plant, int min_x, int max_x
 	}
 }
 
-struct ShadowMapPoint {
-	int x, y, z;
-};
-
 static ShadowMapPoint PointToShadowMapSpace(Plant* plant, HMM_Vec3 point) {
 	int x = (int)((point.X + plant->shadow_volume_half_extent) * SHADOW_VOLUME_DIM);
 	int y = (int)((point.Y + plant->shadow_volume_half_extent) * SHADOW_VOLUME_DIM);
@@ -121,9 +136,8 @@ static bool FindOptimalGrowthDirection(Plant* plant, HMM_Vec3 point, HMM_Vec3* o
 	int min_y = HMM_MAX(shadow_p.y - 1, 0), max_y = HMM_MIN(shadow_p.y + 1, SHADOW_VOLUME_DIM-1);
 	int min_z = HMM_MAX(shadow_p.z - 1, 0), max_z = HMM_MIN(shadow_p.z + 1, SHADOW_VOLUME_DIM-1);
 	
-	uint8_t min_val = 255;
-	ShadowMapPoint min_val_p = shadow_p;
-	int min_val_tiebreaker = -100;
+	HMM_Vec3 dir = {};
+	float dir_weight = 0.f;
 
 	for (int z = min_z; z <= max_z; z++) {
 		for (int y = min_y; y <= max_y; y++) {
@@ -131,19 +145,19 @@ static bool FindOptimalGrowthDirection(Plant* plant, HMM_Vec3 point, HMM_Vec3* o
 				int local_x = x - shadow_p.x, local_y = y - shadow_p.y, local_z = z - shadow_p.z;
 				if (local_x == 0 && local_y == 0 && local_z == 0) continue;
 				
-				int tiebreaker = local_z - local_x*local_x - local_y*local_y;
 				uint8_t val = plant->shadow_volume[z*SHADOW_VOLUME_DIM*SHADOW_VOLUME_DIM + y*SHADOW_VOLUME_DIM + x];
-
-				if (val < min_val || (val == min_val && tiebreaker > min_val_tiebreaker)) {
-					min_val = val;
-					min_val_p = {x, y, z};
-					min_val_tiebreaker = tiebreaker;
-				}
+				float weight = 1.f - (float)val / 255.f;
+				HMM_Vec3 this_dir = {(float)local_x, (float)local_y, (float)local_z};
+				
+				dir += this_dir * weight;
+				dir_weight += weight;
 			}
 		}
 	}
 
-	HMM_Vec3 dir = HMM_Vec3{(float)min_val_p.x, (float)min_val_p.y, (float)min_val_p.z} - HMM_Vec3{(float)shadow_p.x, (float)shadow_p.y, (float)shadow_p.z};
+	if (dir_weight == 0.f) return false;
+	dir /= dir_weight;
+	
 	float dir_len = HMM_LenV3(dir);
 	if (dir_len == 0.f) return false;
 	
@@ -209,18 +223,25 @@ float DistributionWeight(float i, float n) {
 		}
 	}*/
 
+static void UpdateBudSamplePoint(Plant* plant, Bud* bud) {
+	HMM_Vec3 bud_end_point = bud->segments.length > 0 ? DS_ArrPeek(bud->segments).end_point : bud->base_point;
+	HMM_Quat bud_end_rotation = bud->segments.length > 0 ? DS_ArrPeek(bud->segments).end_rotation : bud->base_rotation;
+	bud->end_sample_point = PointToShadowMapSpace(plant, bud_end_point + HMM_RotateV3({0, 0, 1.5f/(float)SHADOW_VOLUME_DIM}, bud_end_rotation));
+}
+
 static void ApicalGrowth(Plant* plant, Bud* bud, float vigor) {
 	float step_length = vigor / (float)SHADOW_VOLUME_DIM;
 
 	HMM_Vec3 bud_end_point = bud->segments.length > 0 ? DS_ArrPeek(bud->segments).end_point : bud->base_point;
 	HMM_Quat bud_end_rotation = bud->segments.length > 0 ? DS_ArrPeek(bud->segments).end_rotation : bud->base_rotation;
 
+	HMM_Vec3 old_dir = HMM_RotateV3({0, 0, 1}, bud_end_rotation);
+
 	HMM_Vec3 optimal_direction = {0, 0, 1};
 	bool optimal_direction_ok = FindOptimalGrowthDirection(plant, bud_end_point, &optimal_direction);
 
-	HMM_Vec3 old_dir = HMM_RotateV3({0, 0, 1}, bud_end_rotation);
 	HMM_Vec3 new_dir = HMM_LerpV3(old_dir, 0.2f, optimal_direction);
-	new_dir.Z -= 0.05f;
+	new_dir.Z -= 0.1f;
 	new_dir = HMM_NormV3(new_dir);
 
 	HMM_Quat rotator_to_new_dir = HMM_ShortestRotationBetweenUnitVectors(old_dir, new_dir, {0, 0, 1});
@@ -243,16 +264,20 @@ static void ApicalGrowth(Plant* plant, Bud* bud, float vigor) {
 			StemSegment* last_segment = DS_ArrPeekPtr(bud->segments);
 
 			HMM_Quat new_bud_rot = {0, 0, 0, 1};
-			new_bud_rot = HMM_QFromAxisAngle_RH({1.f, 0.f, 0.f}, HMM_AngleDeg(40.f)) * new_bud_rot;
+			new_bud_rot = HMM_QFromAxisAngle_RH({1.f, 0.f, 0.f}, HMM_AngleDeg(60.f)) * new_bud_rot;
 			new_bud_rot = HMM_QFromAxisAngle_RH({0.f, 0.f, 1.f}, HMM_AngleRad(bud->next_bud_angle_rad)) * new_bud_rot;
 			new_bud_rot = last_segment->end_rotation * new_bud_rot;
 			bud->next_bud_angle_rad += golden_ratio_rad_increment;
 			
 			Bud* new_bud = DS_New(Bud, plant->arena);
+			new_bud->id = plant->next_bud_id++;
 			new_bud->base_point = last_segment->end_point;
 			new_bud->base_rotation = new_bud_rot;
 			new_bud->next_bud_angle_rad = bud->next_bud_angle_rad + golden_ratio_rad_increment;
+			new_bud->order = bud->order + 1;
 			DS_ArrInit(&new_bud->segments, plant->arena);
+			
+			UpdateBudSamplePoint(plant, new_bud);
 			
 			last_segment->end_lateral = new_bud;
 		}
@@ -266,20 +291,24 @@ static void ApicalGrowth(Plant* plant, Bud* bud, float vigor) {
 		IncrementShadowValueClampedSquare(plant, shadow_p.x - 1, shadow_p.x + 1, shadow_p.y - 1, shadow_p.y + 1, shadow_p.z-1, 6);
 		IncrementShadowValueClampedSquare(plant, shadow_p.x - 2, shadow_p.x + 2, shadow_p.y - 2, shadow_p.y + 2, shadow_p.z-2, 3);
 		IncrementShadowValueClampedSquare(plant, shadow_p.x - 3, shadow_p.x + 3, shadow_p.y - 3, shadow_p.y + 3, shadow_p.z-3, 2);
-		IncrementShadowValueClampedSquare(plant, shadow_p.x - 4, shadow_p.x + 4, shadow_p.y - 4, shadow_p.y + 4, shadow_p.z-4, 1);
+		//IncrementShadowValueClampedSquare(plant, shadow_p.x - 4, shadow_p.x + 4, shadow_p.y - 4, shadow_p.y + 4, shadow_p.z-4, 1);
+		
+		UpdateBudSamplePoint(plant, bud);
 	}
+	
 }
 
 // returns unused vigor
 static float BudGrow(Plant* plant, Bud* bud, float vigor, DS_Arena* temp_arena) {
+	if (bud->order >= 2) return 0.f;
 
 	// shed the branch?
 	if (bud->segments.length > 0) {
-		float branch_lightness = bud->segments.data[0].end_lightness_main + bud->segments.data[0].end_lightness_lateral;
-		if ((float)bud->segments.length * 0.7 > branch_lightness) {
-			bud->is_dead = true;
-			DS_ArrClear(&bud->segments);
-		}
+		//float branch_lightness = bud->segments.data[0].end_lightness_main + bud->segments.data[0].end_lightness_lateral;
+		//if ((float)bud->segments.length * 0.7 > branch_lightness) {
+		//	bud->is_dead = true;
+		//	DS_ArrClear(&bud->segments);
+		//}
 	}
 	
 	if (!bud->is_dead) {
@@ -292,86 +321,127 @@ static float BudGrow(Plant* plant, Bud* bud, float vigor, DS_Arena* temp_arena) 
 		// Let's calculate the average lightness and use this as a binary threshold for giving resources.
 		//float 
 
-		float apical_control = 0.5f;
-		//if (plant->age > 5) apical_control = 0.5f;
+		//float apical_control = 1.f;
+		//if (bud->segments.length > 20) apical_control = 0.3f;
 
-		float avrg_lightness_lateral = 0.f;
-		float avrg_lightness_lateral_weight = 0.f;
-		if (plant->age > 20) { // the birch has reached its first form
-			for (int i = 0; i < bud->segments.length - 1; i++) {
+		//float avrg_lightness_lateral = 0.f;
+		//float max_lightness_lateral = 0.f;
+		//float avrg_lightness_lateral_weight = 0.f;
+		//
+		//for (int i = 0; i < bud->segments.length - 1; i++) {
+		//	StemSegment segment = bud->segments.data[i];
+		//	avrg_lightness_lateral += segment.end_lateral->max_lightness;
+		//	max_lightness_lateral = HMM_MAX(max_lightness_lateral, segment.end_lateral->max_lightness);
+		//	avrg_lightness_lateral_weight += 1.f;
+		//}
+		//avrg_lightness_lateral /= avrg_lightness_lateral_weight;
+
+		// Internal signals to determine which buds to distribute resources to
+		float threshold = 0.2f;//HMM_Lerp(max_lightness_lateral, 0.8f, avrg_lightness_lateral);
+		HMM_Vec3 prev_active_bud_direction = {0, 0, -1};
+
+		DS_DynArray(Bud*) active_buds = {temp_arena};
+
+		// Why does a birch tree want a bit of extra space at the bottom?
+		// A: so that the first branches won't need to compete with bushes and ground plants
+		// B: so that the crown can reach higher and will be able to compete better against neighboring trees
+		// In forests, leaves at the bottom of the tree contribute very little as they receive very little sunlight, so it's smart to never grow them in the first place.
+		// In an open field, this doesn't matter.
+		int first_possible_active_bud = 5;
+
+		if (bud->segments.length > 20) {
+			//float vigor_left = vigor;
+			for (int i = first_possible_active_bud; i < bud->segments.length - 1; i++) { // NOTE: the last segment may not ever have an active lateral bud!
 				StemSegment segment = bud->segments.data[i];
-				segment.end_lightness_lateral += avrg_lightness_lateral;
-				avrg_lightness_lateral_weight += 1.f;
-			}
-			avrg_lightness_lateral /= avrg_lightness_lateral_weight;
-		}
-
-		float vigor_left = vigor;
-		for (int i = 0; i < bud->segments.length - 1; i++) { // NOTE: the last segment may not ever have an active lateral bud!
-			StemSegment segment = bud->segments.data[i];
-			if (segment.end_lightness_lateral + segment.end_lightness_main == 0.f) break;
+				if (segment.end_total_lightness + segment.end_lateral->total_lightness == 0.f) break;
 			
-			// is this an active bud?
-			if (segment.end_lightness_lateral > avrg_lightness_lateral + 0.9f) {
-				float v_main_weight = apical_control * segment.end_lightness_main;
-				float v_lateral_weight = (1.f - apical_control) * segment.end_lightness_lateral;
-				float mult = vigor_left / (v_main_weight + v_lateral_weight);
-				float v_lateral = v_lateral_weight * mult;
-				vigor_left = v_main_weight * mult;
-		
-				vigor_left += BudGrow(plant, segment.end_lateral, v_lateral, temp_arena);
+				HMM_Vec3 lateral_dir = HMM_RotateV3({0, 0, 1}, segment.end_lateral->base_rotation); // @speed
+				
+				// The problem now is that if we have a trunk with equal light in each segment,
+				// it's impossible to "pick" only a few buds to start growing with just a threshold.
+				// I think, per bud, we should assign a random number like "bud quality". Still, then there will be a difference between lateral branches and branches going upwards.
+				
+				// for now, ignore the lightness and just say it's totally random.
+
+				RandomGenerator rng = RandomInit(segment.end_lateral->id);
+  				float bud_random_strength_bias = RandomFloat(&rng, 0.f, 1.f);
+
+				// is this an active bud?
+				if (/*segment.end_lateral->max_lightness + */bud_random_strength_bias > threshold &&
+					HMM_DotV3(lateral_dir, prev_active_bud_direction) < 0.f)
+				{
+					DS_ArrPush(&active_buds, segment.end_lateral);
+					//float v_main_weight = apical_control * segment.end_total_lightness;
+					//float v_lateral_weight = (1.f - apical_control) * segment.end_lateral->total_lightness;
+					//float mult = vigor_left / (v_main_weight + v_lateral_weight);
+					//float v_lateral = v_lateral_weight * mult;
+					//vigor_left = v_main_weight * mult;
+
+					//vigor_left += BudGrow(plant, segment.end_lateral, v_lateral, temp_arena);
+				
+					prev_active_bud_direction = lateral_dir;
+				}
 			}
 		}
 
-		int v_main_floor = (int)vigor_left;
-		float vigor_per_step = v_main_floor / (float)v_main_floor;
+		// equally distribute vigor
+		float vigor_per_bud = vigor / ((float)active_buds.length + 1.f);
+
+		// how much vigor to give to lateral buds?
+		for (int i = 0; i < active_buds.length; i++) {
+			Bud* lateral_bud = active_buds.data[i];
+			BudGrow(plant, lateral_bud, vigor_per_bud, temp_arena);
+		}
+
+		int v_main_floor = (int)vigor_per_bud;//(int)vigor_left;
+		float vigor_per_step = vigor_per_bud / (float)v_main_floor;
 		for (int j = 0; j < v_main_floor; j++) {
 			ApicalGrowth(plant, bud, vigor_per_step);
 		}
 
-		return v_main_floor == 0 ? vigor_left : 0;
+		return 0.f; //return v_main_floor == 0 ? vigor_per_bud : 0;
 	}
 	return 0.f;
 }
 
-static float PlantCalculateLight(Plant* plant, Bud* bud) {
-	HMM_Vec3 apical_point = bud->segments.length > 0 ? DS_ArrPeek(bud->segments).end_point : bud->base_point;
-
-	ShadowMapPoint shadow_p = PointToShadowMapSpace(plant, apical_point);
+static void PlantCalculateLight(Plant* plant, Bud* bud) {
+	ShadowMapPoint shadow_p = bud->end_sample_point;
 	uint8_t val = plant->shadow_volume[shadow_p.z*SHADOW_VOLUME_DIM*SHADOW_VOLUME_DIM + shadow_p.y*SHADOW_VOLUME_DIM + shadow_p.x];
 	
-	float lightness_main = 1.f - ((float)val-1.f)/255.f;
-	lightness_main = HMM_MAX(lightness_main, 0.f);
+	float total_lightness = 1.f - ((float)val-1.f)/255.f;
+	total_lightness = HMM_MAX(total_lightness, 0.f);
+	
+	float max_lightness = total_lightness;
 
-	//const float bud_width = 0.0005f;
 	const float bud_width = 0.002f;
 	float width = bud_width;
 
 	for (int i = bud->segments.length - 1; i >= 0; i--) {
 		StemSegment* segment = &bud->segments.data[i];
-		segment->end_lightness_main = lightness_main;
-		segment->end_lightness_lateral = 0.f;
-
+		segment->end_total_lightness = total_lightness;
 		if (segment->end_lateral) {
-			segment->end_lightness_lateral = PlantCalculateLight(plant, segment->end_lateral);
-
-			float lateral_width = segment->end_lateral->segments.length > 0 ? segment->end_lateral->segments.data[0].width : bud_width;
+			PlantCalculateLight(plant, segment->end_lateral);
+			
+			//float lateral_width = segment->end_lateral->segments.length > 0 ? segment->end_lateral->segments.data[0].width : bud_width;
 			//assert(lateral_width >= bud_width);
 			//width = sqrtf(width*width + lateral_width*lateral_width);
 			//width += lateral_width*1.f;
+			
+			max_lightness = HMM_MAX(max_lightness, segment->end_lateral->max_lightness);
+			total_lightness += segment->end_lateral->total_lightness;
 		}
-
 		segment->width = width;
-		lightness_main += segment->end_lightness_lateral;
 	}
 	
-	return lightness_main;
+	bud->total_lightness = total_lightness;
+	bud->max_lightness = max_lightness;
 }
 
 static void PlantInit(Plant* plant, DS_Arena* arena) {
 	memset(plant, 0, sizeof(*plant));
 	plant->arena = arena;
 	//DS_ArrInit(&plant->all_buds, arena);
+	plant->root.id = plant->next_bud_id++;
 	plant->root.base_point = {0.5f/SHADOW_VOLUME_DIM, 0.5f/SHADOW_VOLUME_DIM, 0.5f/SHADOW_VOLUME_DIM};
 	plant->root.base_rotation = {0, 0, 0, 1};
 	plant->shadow_volume_half_extent = 0.5f;
@@ -379,9 +449,9 @@ static void PlantInit(Plant* plant, DS_Arena* arena) {
 }
 
 static void PlantDoGrowthIteration(Plant* plant, const PlantParameters* params, DS_Arena* temp_arena) {
-	float vigor_scale = 1.5f;
-	float light = PlantCalculateLight(plant, &plant->root);
-	BudGrow(plant, &plant->root, vigor_scale * light, temp_arena);
+	float vigor_scale = 1.1f;
+	PlantCalculateLight(plant, &plant->root);
+	BudGrow(plant, &plant->root, vigor_scale * plant->root.total_lightness, temp_arena);
 	plant->age++;
 
 	//if (plant->base) {

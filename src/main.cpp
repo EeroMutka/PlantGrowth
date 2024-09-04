@@ -718,7 +718,7 @@ static void TextureInitFromFile(B3R_Texture* texture, const char* filepath) {
 
 int main() {
 	InitApp();
-
+	
 	g_camera.pos.Y = -0.6f;
 	g_camera.pos.Z = 0.3f;
 

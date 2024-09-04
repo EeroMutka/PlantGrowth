@@ -240,8 +240,8 @@ static void ApicalGrowth(Plant* plant, Bud* bud, float vigor) {
 		HMM_Vec3 optimal_direction = {0, 0, 1};
 		bool optimal_direction_ok = FindOptimalGrowthDirection(plant, bud_end_point, &optimal_direction);
 
-		HMM_Vec3 new_dir = HMM_LerpV3(old_dir, 0.2f * step_scale, optimal_direction);
-		new_dir.Z -= 0.1f * step_scale;
+		HMM_Vec3 new_dir = HMM_LerpV3(old_dir, 1.f * step_scale, optimal_direction);
+		new_dir.Z -= 0.2f * step_scale;
 		new_dir = HMM_NormV3(new_dir);
 
 		HMM_Quat rotator_to_new_dir = HMM_ShortestRotationBetweenUnitVectors(old_dir, new_dir, {0, 0, 1});
@@ -353,14 +353,31 @@ static void BudGrow(Plant* plant, Bud* bud, float vigor, DS_Arena* temp_arena) {
 		// B: so that the crown can reach higher and will be able to compete better against neighboring trees
 		// In forests, leaves at the bottom of the tree contribute very little as they receive very little sunlight, so it's smart to never grow them in the first place.
 		// In an open field, this doesn't matter.
-		int first_possible_active_bud = 10;
 
-		bool apical_control = false;
-		//if (bud->order == 0) apical_control = bud->segments.length < 20;
-		//if (bud->order == 1) apical_control = bud->segments.length < 10;
-		//if (bud->order == 2) apical_control = false;
+		//bool distribute = true;
+		
 
-		if (!apical_control) {
+		// we want apical control to be a ratio.
+		// 0 means all resources are given equally to all lateral buds, and nothing is given to the apical bud.
+		// 1 means all resources are given equally to all buds, including apical bud.
+			
+		float apical_control = 1.f;
+
+		int first_possible_active_bud = 3;
+		if (bud->order == 0) {
+			if (bud->segments.length > 30) apical_control = 0.2f;
+			first_possible_active_bud = 10;
+		}
+		if (bud->order == 1) {
+			if (bud->segments.length > 5) apical_control = 0.2f;
+		}
+		if (bud->order > 1) {
+			apical_control = 0.5f;
+		}
+
+		float v_main = vigor;
+
+		if (1) { //if (distribute) {
 			//float vigor_left = vigor;
 			for (int i = first_possible_active_bud; i < bud->segments.length - 1; i++) { // NOTE: the last segment may not ever have an active lateral bud!
 				StemSegment segment = bud->segments.data[i];
@@ -393,18 +410,18 @@ static void BudGrow(Plant* plant, Bud* bud, float vigor, DS_Arena* temp_arena) {
 					prev_active_bud_direction = lateral_dir;
 				}
 			}
+			
+			float v_lateral = HMM_Clamp(2.f - 2.f*apical_control, 0.f, 1.f) * vigor / ((float)active_buds.length + 2.f*apical_control);
+			v_main = vigor - v_lateral*(float)active_buds.length;
+			
+			// how much vigor to give to lateral buds?
+			for (int i = 0; i < active_buds.length; i++) {
+				Bud* lateral_bud = active_buds.data[i];
+				BudGrow(plant, lateral_bud, v_lateral, temp_arena);
+			}
 		}
 
-		// equally distribute vigor
-		float vigor_per_bud = vigor / ((float)active_buds.length + 1.f);
-
-		// how much vigor to give to lateral buds?
-		for (int i = 0; i < active_buds.length; i++) {
-			Bud* lateral_bud = active_buds.data[i];
-			BudGrow(plant, lateral_bud, vigor_per_bud, temp_arena);
-		}
-
-		ApicalGrowth(plant, bud, vigor_per_bud);
+		ApicalGrowth(plant, bud, v_main);
 	}
 }
 

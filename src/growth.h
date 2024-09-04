@@ -309,7 +309,7 @@ static void ApicalGrowth(Plant* plant, Bud* bud, float vigor) {
 }
 
 static void BudGrow(Plant* plant, Bud* bud, float vigor, DS_Arena* temp_arena) {
-	//if (bud->order >= 1) return;
+	//if (bud->order >= 3) return;
 	//if (bud->order >= 3) return;
 	
 	// shed the branch?
@@ -332,7 +332,7 @@ static void BudGrow(Plant* plant, Bud* bud, float vigor, DS_Arena* temp_arena) {
 		//float 
 
 		// Internal signals to determine which buds to distribute resources to
-		float threshold = 0.2f;//HMM_Lerp(max_lightness_lateral, 0.8f, avrg_lightness_lateral);
+		float threshold = 0.2f;
 		HMM_Vec3 prev_active_bud_direction = {0, 0, -1};
 
 		DS_DynArray(Bud*) active_buds = {temp_arena};
@@ -352,12 +352,17 @@ static void BudGrow(Plant* plant, Bud* bud, float vigor, DS_Arena* temp_arena) {
 		if (bud->order == 0) {
 			if (bud->segments.length > 30) apical_control = 0.2f;
 			first_possible_active_bud = 10;
+			threshold = 0.f;
 		}
 		if (bud->order == 1) {
-			if (bud->segments.length > 5) apical_control = 0.2f;
+			apical_control = 0.8f;
+			if (bud->segments.length > 4) apical_control = 0.3f;
+			threshold = 0.f;
 		}
-		if (bud->order > 1) {
-			apical_control = 0.5f;
+		if (bud->order >= 2) {
+			apical_control = 0.2f;
+			//first_possible_active_bud = 0;
+			threshold = 0.2f;
 		}
 
 		float vigor_after_leaf_growth = vigor;
@@ -472,6 +477,7 @@ static void PlantInit(Plant* plant, DS_Arena* arena) {
 
 static void PlantDoGrowthIteration(Plant* plant, const PlantParameters* params, DS_Arena* temp_arena) {
 	float vigor_scale = 5.1f;
+	//float vigor_scale = 10.f;
 	PlantCalculateLight(plant, &plant->root);
  	BudGrow(plant, &plant->root, vigor_scale/* * plant->root.total_lightness*/, temp_arena);
 	plant->age++;

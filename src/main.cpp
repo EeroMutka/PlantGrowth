@@ -347,7 +347,7 @@ static void MeshBuilderAddQuad(MeshIndexList* list, uint32_t a, uint32_t b, uint
 	DS_ArrPush(list, a); DS_ArrPush(list, c); DS_ArrPush(list, d);
 }
 
-static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* indices, ImportedMesh* imported_mesh, HMM_Vec3 position, HMM_Quat rotation, float scale, float morph_amount, uint32_t color)
+static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* indices, ImportedMesh* imported_mesh, const HMM_Vec3* position, const HMM_Mat3* rot_scale, float morph_amount, uint32_t color)
 {
 	ImportedMeshMorphTarget base_morph = DS_ArrGet(imported_mesh->vertices_morphs, 0);
 	
@@ -362,11 +362,10 @@ static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* 
 		
 			vert.position += morph_amount * second_vert.position;
 			vert.normal += morph_amount * second_vert.normal;
-			vert.normal = HMM_NormV3(vert.normal);
 		}
 
-		vert.position = position + HMM_RotateV3(vert.position * scale, rotation);
-		vert.normal = HMM_RotateV3(vert.normal, rotation);
+		vert.position = *position + HMM_MulM3V3(*rot_scale, vert.position);
+		vert.normal = HMM_MulM3V3(*rot_scale, vert.normal);
 		vert.color_rgba = color;
 		DS_ArrPush(vertices, vert);
 	}
@@ -394,7 +393,7 @@ static void RegeneratePlantShadowMapMesh(Plant* plant) {
 					if (lightness > 255) lightness = 255;
 					
 					uint32_t rgba = (uint32_t)lightness | ((uint32_t)lightness << 8) | ((uint32_t)lightness << 16) | (0xFF << 24);
-					MeshBuilderAddImportedMesh(&vertices, &indices, &g_imported_mesh_unit_cube, pos, {0, 0, 0, 1}, 0.8f*voxel_size, 0.f, rgba);
+					//MeshBuilderAddImportedMesh(&vertices, &indices, &g_imported_mesh_unit_cube, pos, {0, 0, 0, 1}, 0.8f*voxel_size, 0.f, rgba);
 				}
 				i++;
 			}
@@ -411,8 +410,17 @@ static void RegeneratePlantShadowMapMesh(Plant* plant) {
 static void RegeneratePlantMeshStep(MeshVertexList* vertices, MeshIndexList* indices, Bud* bud) {
 	
 	if (bud->leaf_growth > 0.f) {
+		// TODO: the leaf generation could be optimized by caching COMPLETE leaves! We could have one mesh which is "complete leaves" mesh, and another which is
+		// "in-progress" stuff + the branches. In fact, we could even cache completed branches! The mesh generation would become a lot faster. We should have them as completely separate renderable meshes as well just so we don't need to do index buffer copy stuff.
+		// 
+		// Or actually! for leaves, we can reserve ranges in the vertex buffer easily, and rewrite into the leaves that are changed in an iteration.
+		// We can then easily animate leaves falling on the ground as well in the tree-generator.
+		// 
+		// We could kill leaves by setting their vertex positions with dead leaves by animating their vertex positions over time to fall on the ground.
+
 		uint32_t green_rgba = 0xFF409060;
-		MeshBuilderAddImportedMesh(vertices, indices, &g_imported_mesh_leaf, bud->base_point, bud->base_rotation, 0.1f, bud->leaf_growth, green_rgba);
+		HMM_Mat3 rot_scale = HMM_QToM3(bud->base_rotation, 0.125f);
+		MeshBuilderAddImportedMesh(vertices, indices, &g_imported_mesh_leaf, &bud->base_point, &rot_scale, bud->leaf_growth, green_rgba);
 	}
 
 	if (bud->segments.length > 0) {
@@ -445,7 +453,7 @@ static void RegeneratePlantMeshStep(MeshVertexList* vertices, MeshIndexList* ind
 				float theta = 2.f * HMM_PI32 * (float)k / (float)num_segments;
 
 				HMM_Vec3 point_normal = local_x_dir * cosf(theta) + local_y_dir * sinf(theta);
-				HMM_Vec3 point = base_point + point_normal * segment->width;
+				HMM_Vec3 point = base_point + point_normal * (segment->width);
 
 				SimpleGPUMeshVertex vertex;
 				vertex.position = point;
@@ -762,6 +770,7 @@ static void TextureInitFromFile(B3R_Texture* texture, const char* filepath) {
 int main() {
 	InitApp();
 	
+
 	g_camera.pos.Y = -0.6f;
 	g_camera.pos.Z = 0.3f;
 

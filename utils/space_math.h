@@ -25,6 +25,7 @@ typedef HMM_Vec4 HMM_Plane;
 static HMM_Quat HMM_ShortestRotationBetweenUnitVectors(HMM_Vec3 from, HMM_Vec3 to, HMM_Vec3 fallback_axis);
 
 static HMM_Vec3 HMM_RotateV3(HMM_Vec3 vector, HMM_Quat rotator);
+static HMM_Mat3 HMM_QToM3(HMM_Quat q, float scale);
 
 static HMM_Plane HMM_PlaneFromPointAndNormal(HMM_Vec3 plane_p, HMM_Vec3 plane_n);
 static HMM_Plane HMM_FlipPlane(HMM_Plane plane);
@@ -183,6 +184,38 @@ static HMM_Vec3 HMM_RotateV3(HMM_Vec3 vector, HMM_Quat rotator) {
 	HMM_Vec3 c = HMM_AddV3(b, a);
 	HMM_Vec3 d = HMM_Cross(rotator.XYZ, c);
 	return HMM_AddV3(vector, HMM_MulV3F(d, 2.f));
+}
+
+static HMM_Mat3 HMM_QToM3(HMM_Quat q, float scale) {
+	HMM_Mat3 Result;
+
+	float XX, YY, ZZ,
+		XY, XZ, YZ,
+		WX, WY, WZ;
+
+	XX = q.X * q.X;
+	YY = q.Y * q.Y;
+	ZZ = q.Z * q.Z;
+	XY = q.X * q.Y;
+	XZ = q.X * q.Z;
+	YZ = q.Y * q.Z;
+	WX = q.W * q.X;
+	WY = q.W * q.Y;
+	WZ = q.W * q.Z;
+
+	Result.Elements[0][0] = scale * (1.0f - 2.0f * (YY + ZZ));
+	Result.Elements[0][1] = scale * (2.0f * (XY + WZ));
+	Result.Elements[0][2] = scale * (2.0f * (XZ - WY));
+
+	Result.Elements[1][0] = scale * (2.0f * (XY - WZ));
+	Result.Elements[1][1] = scale * (1.0f - 2.0f * (XX + ZZ));
+	Result.Elements[1][2] = scale * (2.0f * (YZ + WX));
+
+	Result.Elements[2][0] = scale * (2.0f * (XZ + WY));
+	Result.Elements[2][1] = scale * (2.0f * (YZ - WX));
+	Result.Elements[2][2] = scale * (1.0f - 2.0f * (XX + YY));
+
+	return Result;
 }
 
 static float HMM_SignedDistanceToPlane(HMM_Vec3 p, HMM_Plane plane) {

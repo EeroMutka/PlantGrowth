@@ -168,7 +168,7 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n		output.position.y *= -1.;
 \n		output.position_ws = vertex.position;
 \n	#if defined(B3R_VERT_LAYOUT_POSNORUVCOL)
-\n		output.normal = vertex.normal;
+\n		output.normal = normalize(vertex.normal);
 \n		output.uv = vertex.uv;
 \n		output.color = vertex.color;
 \n	#endif

@@ -409,43 +409,59 @@ static void RegeneratePlantShadowMapMesh(Plant* plant) {
 }
 
 static void RegeneratePlantMeshStep(MeshVertexList* vertices, MeshIndexList* indices, Bud* bud) {
-	if (bud->segments.length == 0) return;
+	
+	if (bud->leaf_growth > 0.f) {
+		uint32_t green_rgba = 0xFF409060;
+		MeshBuilderAddImportedMesh(vertices, indices, &g_imported_mesh_leaf, bud->base_point, bud->base_rotation, 0.1f, bud->leaf_growth, green_rgba);
+	}
 
-	uint32_t prev_circle_first_vertex = 0;
-	for (int j = -1; j < bud->segments.length; j++) {
-		HMM_Vec3 base_point;
-		StemSegment* segment;
-		if (j == -1) {
-			segment = &bud->segments.data[0];
-			base_point = bud->base_point;
-		} else {
-			segment = &bud->segments.data[j];
-			if (segment->end_lateral) {
-				RegeneratePlantMeshStep(vertices, indices, segment->end_lateral);
+	if (bud->segments.length > 0) {
+		uint32_t prev_circle_first_vertex = 0;
+		for (int j = -1; j < bud->segments.length; j++) {
+			HMM_Vec3 base_point;
+			StemSegment* segment;
+			if (j == -1) {
+				segment = &bud->segments.data[0];
+				base_point = bud->base_point;
+			} else {
+				segment = &bud->segments.data[j];
+				if (segment->end_lateral) {
+					RegeneratePlantMeshStep(vertices, indices, segment->end_lateral);
+				}
+				base_point = segment->end_point;
 			}
-			base_point = segment->end_point;
-		}
 
-		HMM_Vec3 local_x_dir = HMM_RotateV3({1, 0, 0}, segment->end_rotation);
-		HMM_Vec3 local_y_dir = HMM_RotateV3({0, 1, 0}, segment->end_rotation);
+			HMM_Vec3 local_x_dir = HMM_RotateV3({1, 0, 0}, segment->end_rotation);
+			HMM_Vec3 local_y_dir = HMM_RotateV3({0, 1, 0}, segment->end_rotation);
+		
+			//float barkness = HMM_Clamp(segment->width / 0.0005f, 0.f, 1.f);
+			//HMM_Vec3 color = HMM_LerpV3({80, 150, 60}, barkness, {100, 80, 40});
+			HMM_Vec3 color = {100, 80, 40};
+			uint32_t color_u32 = (uint32_t)color.R | (uint32_t)color.G << 8 | (uint32_t)color.B << 16 | 0xFF << 24;
 
-		uint32_t first_vertex = (uint32_t)vertices->length;
-		int num_segments = 8;
-		for (int k = 0; k < num_segments; k++) {
-			float theta = 2.f * HMM_PI32 * (float)k / (float)num_segments;
+			uint32_t first_vertex = (uint32_t)vertices->length;
+			int num_segments = 8;
+			for (int k = 0; k <= num_segments; k++) {
+				float theta = 2.f * HMM_PI32 * (float)k / (float)num_segments;
 
-			HMM_Vec3 point_normal = local_x_dir * cosf(theta) + local_y_dir * sinf(theta);
-			HMM_Vec3 point = base_point + point_normal * segment->width;
+				HMM_Vec3 point_normal = local_x_dir * cosf(theta) + local_y_dir * sinf(theta);
+				HMM_Vec3 point = base_point + point_normal * segment->width;
 
-			DS_ArrPush(vertices, {point, point_normal, {0, 0}, 50, 150, 40, 255});
+				SimpleGPUMeshVertex vertex;
+				vertex.position = point;
+				vertex.normal = point_normal;
+				vertex.color_rgba = color_u32;
+				DS_ArrPush(vertices, vertex);
 
-			if (j >= 0) {
-				int next_k = (k + 1) % 8;
-				MeshBuilderAddQuad(indices, prev_circle_first_vertex + k, prev_circle_first_vertex + next_k, first_vertex + next_k, first_vertex + k);
+				if (j >= 0) {
+					int next_k = (k + 1) % num_segments;
+					MeshBuilderAddQuad(indices, prev_circle_first_vertex + k, prev_circle_first_vertex + next_k, first_vertex + next_k, first_vertex + k);
+				}
 			}
-		}
 
-		prev_circle_first_vertex = first_vertex;
+
+			prev_circle_first_vertex = first_vertex;
+		}
 	}
 }
 
@@ -484,8 +500,10 @@ static void UpdateAndRender() {
 	PlantParameters plant_params_old;
 	memcpy(&plant_params_old, &g_plant_params, sizeof(PlantParameters)); // use memcpy to copy any compiler-introduced padding bytes as well
 
+	static bool wireframe = false;
 	static bool visualize_shadow_map = false;
 	UI_AddFmt(UI_KEY(), "Visualize shadow map: %!b", &visualize_shadow_map);
+	UI_AddFmt(UI_KEY(), "Wireframe: %!b", &wireframe);
 	/*
 	UI_AddFmt(UI_KEY(), "Step size: %!f", &g_plant_params.step_size);
 	UI_AddFmt(UI_KEY(), "Age: %!f", &g_plant_params.age);
@@ -509,20 +527,44 @@ static void UpdateAndRender() {
 	UI_AddFmt(UI_KEY(), "Equal growth deceler: %!f", &g_plant_params.equal_growth_deceler);
 	UI_AddFmt(UI_KEY(), "Leaf growth speed: %!f", &g_plant_params.leaf_growth_speed);*/
 
+	static bool simulating = true;
+	
+	bool pressed_reset = false;
+	if (simulating) {
+		if (UI_Clicked(UI_AddButton(UI_KEY(), UI_SizeFit(), UI_SizeFit(), 0, STR_("PAUSE"))->key)) {
+			simulating = false;
+		}
+	} else {
+		if (UI_Clicked(UI_AddButton(UI_KEY(), UI_SizeFit(), UI_SizeFit(), 0, STR_("SIMULATE"))->key)) {
+			simulating = true;
+		}
+	}
+	if (UI_Clicked(UI_AddButton(UI_KEY(), UI_SizeFit(), UI_SizeFit(), 0, STR_("RESET"))->key)) {
+		pressed_reset = true;
+	}
+
 	UI_PopBox(root);
 
-	static bool first_frame = true;
-	if (Input_WentDownOrRepeat(&g_inputs, Input_Key_Delete) || first_frame) {
-		DS_ArenaReset(&g_plant_arena);
-		PlantInit(&g_plant, &g_plant_arena);
-		first_frame = false;
+	// plant simulation
+	{
+		static bool first_frame = true;
+		if (first_frame || pressed_reset) {
+			DS_ArenaReset(&g_plant_arena);
+			PlantInit(&g_plant, &g_plant_arena);
+			RegeneratePlantMesh();
+			first_frame = false;
+		}
+
+		if (simulating) {
+			PlantDoGrowthIteration(&g_plant, &g_plant_params, &g_temp);
+			RegeneratePlantMesh();
+		}
 	}
 
-	if (Input_WentDownOrRepeat(&g_inputs, Input_Key_Space)) {
-		PlantDoGrowthIteration(&g_plant, &g_plant_params, &g_temp);
-		RegeneratePlantMesh();
-		//RegeneratePlantShadowMapMesh(&g_plant);
-	}
+	//if (Input_WentDownOrRepeat(&g_inputs, Input_Key_Space)) {
+	//	RegeneratePlantShadowMapMesh(&g_plant);
+	//}
+	
 //	bool regen_plant = memcmp(&plant_params_old, &g_plant_params, sizeof(PlantParameters)) != 0 || !g_has_plant_mesh;
 //	if (regen_plant) {
 //		DS_ArenaReset(&g_plant_arena);
@@ -546,12 +588,13 @@ static void UpdateAndRender() {
 	B3R_BeginDrawing(g_dx11_device_context, g_dx11_framebuffer_view, g_dx11_depthbuffer_view, g_camera.cached.clip_from_world, g_camera.cached.position);
 	B3R_DrawWireMesh(&g_grid_mesh, 0.001f, 100000.f, 100000.f, 1.f, 1.f, 1.f, 1.f);
 	
-	B3R_BindDirectionalLight(0, {0.f, 0.f, -1.f}, 0.7f, {1.f, 1.f, 1.f});
-	B3R_DrawMesh(&g_plant_gpu_mesh, B3R_DebugMode_None);
+	B3R_BindDirectionalLight(0, HMM_NormV3({0.1f, 0.2f, -1.f}), 0.7f, {1.f, 1.f, 1.f});
+	B3R_BindTexture(NULL);
+	B3R_DrawMesh(&g_plant_gpu_mesh, wireframe ? B3R_DebugMode_Wireframe : B3R_DebugMode_None);
 
-	//B3R_BindDirectionalLight(0, {}, 1.f, {1.f, 1.f, 1.f});
-	//B3R_BindTexture(&g_texture_skybox);
-	//B3R_DrawMesh(&g_mesh_skybox, B3R_DebugMode_None);
+	B3R_BindDirectionalLight(0, {}, 1.f, {1.f, 1.f, 1.f});
+	B3R_BindTexture(&g_texture_skybox);
+	B3R_DrawMesh(&g_mesh_skybox, B3R_DebugMode_None);
 	
 	if (visualize_shadow_map) {
 		B3R_DrawMesh(&g_plant_shadow_map_mesh, B3R_DebugMode_None);
@@ -731,7 +774,7 @@ int main() {
 	g_imported_mesh_unit_cube = ImportMesh(&g_persist, "../resources/unit_cube.glb");
 	
 	MeshInitFromFile(&g_mesh_skybox, "../resources/skysphere.glb");
-	//TextureInitFromFile(&g_texture_skybox, "../resources/skysphere_texture.png");
+	TextureInitFromFile(&g_texture_skybox, "../resources/skysphere_texture.png");
 
 	while (!OS_WINDOW_ShouldClose(&g_window)) {
 		DS_ArenaReset(&g_temp);
@@ -746,7 +789,7 @@ int main() {
 		UpdateAndRender();
 	}
 	
-	//B3R_TextureDeinit(&g_texture_skybox);
+	B3R_TextureDeinit(&g_texture_skybox);
 	B3R_MeshDeinit(&g_mesh_skybox);
 
 	B3R_WireMeshDeinit(&g_grid_mesh);

@@ -348,7 +348,7 @@ static void MeshBuilderAddQuad(MeshIndexList* list, uint32_t a, uint32_t b, uint
 }
 
 static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* indices, ImportedMesh* imported_mesh,
-	const HMM_Vec3* position, const HMM_Mat3* rot_scale, const HMM_Vec3* soft_normal, float morph_amount, uint32_t color)
+	const HMM_Vec3* position, const HMM_Mat3* rot_scale, float morph_amount, uint32_t color)
 {
 	ImportedMeshMorphTarget base_morph = DS_ArrGet(imported_mesh->vertices_morphs, 0);
 	
@@ -365,10 +365,12 @@ static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* 
 			vert.normal += morph_amount * second_vert.normal;
 		}
 
-		if (soft_normal) vert.normal = HMM_Lerp(vert.normal, 0.5f, *soft_normal);
 
 		vert.position = *position + HMM_MulM3V3(*rot_scale, vert.position);
 		vert.normal = HMM_MulM3V3(*rot_scale, vert.normal);
+		
+		//if (soft_normal) vert.normal = HMM_Lerp(HMM_NormV3(vert.normal), 0.5f, *soft_normal);
+
 		vert.color_rgba = color;
 		DS_ArrPush(vertices, vert);
 	}
@@ -410,7 +412,7 @@ static void RegeneratePlantShadowMapMesh(Plant* plant) {
 	g_has_plant_shadow_map_mesh = true;
 }
 
-static void RegeneratePlantMeshStep(MeshVertexList* vertices, MeshIndexList* indices, Bud* bud, HMM_Vec3 soft_normal) {
+static void RegeneratePlantMeshStep(Plant* plant, MeshVertexList* vertices, MeshIndexList* indices, Bud* bud) {
 	if (bud->leaf_growth > 0.f) {
 		// TODO: the leaf generation could be optimized by caching COMPLETE leaves! We could have one mesh which is "complete leaves" mesh, and another which is
 		// "in-progress" stuff + the branches. In fact, we could even cache completed branches! The mesh generation would become a lot faster. We should have them as completely separate renderable meshes as well just so we don't need to do index buffer copy stuff.
@@ -420,12 +422,17 @@ static void RegeneratePlantMeshStep(MeshVertexList* vertices, MeshIndexList* ind
 		// 
 		// We could kill leaves by setting their vertex positions with dead leaves by animating their vertex positions over time to fall on the ground.
 
-		uint32_t green_rgba = 154 | 170 << 8 | 37 << 16 | 255 << 24;
+		// how can we determine the leaf occlusion?
+		ShadowMapPoint shadow_p = PointToShadowMapSpace(plant, bud->base_point);
+		float lightness = 1.f - (float)plant->shadow_volume[shadow_p.z*SHADOW_VOLUME_DIM*SHADOW_VOLUME_DIM + shadow_p.y*SHADOW_VOLUME_DIM + shadow_p.x] / 255.f;
+		
+		//HMM_Vec3 color = HMM_LerpV3({80, 150, 60}, lightness, {120, 255, 90});
+		HMM_Vec3 color = HMM_LerpV3({40, 100, 30}, lightness, {150, 255, 90});
+		uint32_t color_u32 = (uint32_t)color.R | (uint32_t)color.G << 8 | (uint32_t)color.B << 16 | 255 << 24;
+
 		HMM_Mat3 rot_scale = HMM_QToM3(bud->base_rotation, 0.125f);
 		
-		//HMM_Vec3 leaf_normal = {0, 0, -1};
-		//if (parent) leaf_normal = HMM_RotateV3({0, 0, -1}, parent->base_rotation);
-		MeshBuilderAddImportedMesh(vertices, indices, &g_imported_mesh_leaf, &bud->base_point, &rot_scale, &soft_normal, bud->leaf_growth, green_rgba);
+		MeshBuilderAddImportedMesh(vertices, indices, &g_imported_mesh_leaf, &bud->base_point, &rot_scale, bud->leaf_growth, color_u32);
 	}
 
 	if (bud->segments.length > 0) {
@@ -439,8 +446,7 @@ static void RegeneratePlantMeshStep(MeshVertexList* vertices, MeshIndexList* ind
 			} else {
 				segment = &bud->segments.data[j];
 				if (segment->end_lateral) {
-					HMM_Vec3 lateral_soft_normal = HMM_LerpV3(soft_normal, 0.5f, HMM_RotateV3({0, 0, 1}, segment->end_rotation));
-					RegeneratePlantMeshStep(vertices, indices, segment->end_lateral, lateral_soft_normal);
+					RegeneratePlantMeshStep(plant, vertices, indices, segment->end_lateral);
 				}
 				base_point = segment->end_point;
 			}
@@ -450,7 +456,11 @@ static void RegeneratePlantMeshStep(MeshVertexList* vertices, MeshIndexList* ind
 		
 			//float barkness = HMM_Clamp(segment->width / 0.0005f, 0.f, 1.f);
 			//HMM_Vec3 color = HMM_LerpV3({80, 150, 60}, barkness, {100, 80, 40});
-			HMM_Vec3 color = {100, 80, 40};
+			ShadowMapPoint shadow_p = PointToShadowMapSpace(plant, segment->end_point);
+			float lightness = 1.f - 2.f*(float)plant->shadow_volume[shadow_p.z*SHADOW_VOLUME_DIM*SHADOW_VOLUME_DIM + shadow_p.y*SHADOW_VOLUME_DIM + shadow_p.x] / 255.f;
+			lightness = HMM_MAX(lightness, 0.f);
+
+			HMM_Vec3 color = HMM_LerpV3({95, 95, 75}, lightness, {120, 100, 80});
 			uint32_t color_u32 = (uint32_t)color.R | (uint32_t)color.G << 8 | (uint32_t)color.B << 16 | 0xFF << 24;
 
 			uint32_t first_vertex = (uint32_t)vertices->length;
@@ -482,7 +492,7 @@ static void RegeneratePlantMeshStep(MeshVertexList* vertices, MeshIndexList* ind
 static void RegeneratePlantMesh() {
 	MeshVertexList vertices = {&g_temp};
 	MeshIndexList indices = {&g_temp};
-	RegeneratePlantMeshStep(&vertices, &indices, &g_plant.root, {0, 0, 1});
+	RegeneratePlantMeshStep(&g_plant, &vertices, &indices, &g_plant.root);
 
 	if (g_has_plant_mesh) {
 		B3R_MeshDeinit(&g_plant_gpu_mesh);
@@ -602,8 +612,9 @@ static void UpdateAndRender() {
 	B3R_BeginDrawing(g_dx11_device_context, g_dx11_framebuffer_view, g_dx11_depthbuffer_view, g_camera.cached.clip_from_world, g_camera.cached.position);
 	B3R_DrawWireMesh(&g_grid_mesh, 0.001f, 100000.f, 100000.f, 1.f, 1.f, 1.f, 1.f);
 	
-	B3R_BindDirectionalLight(0, HMM_NormV3({0.5f, -0.4f, -1.f}), 0.2f, 0.8f*HMM_Vec3{1.f, 0.9f, 0.7f});
-	B3R_BindDirectionalLight(1, HMM_NormV3({0.f, 0.f, 1.f}), 0.7f, 1.5f*HMM_Vec3{0.5f, 0.6f, 0.6f});
+	//B3R_BindDirectionalLight(0, HMM_NormV3({0.5f, -0.4f, -1.f}), 0.5f, 0.5f*HMM_Vec3{1.f, 0.9f, 0.7f});
+	B3R_BindDirectionalLight(0, HMM_NormV3({1.f, 0.f, -1.f}), 0.6f, 0.3f*HMM_Vec3{1.f, 0.9f, 0.7f});
+	B3R_BindDirectionalLight(1, HMM_NormV3({0.f, 0.f, -1.f}), 0.8f, 1.f*HMM_Vec3{0.55f, 0.6f, 0.6f});
 	B3R_BindTexture(NULL);
 	B3R_DrawMesh(&g_plant_gpu_mesh, wireframe ? B3R_DebugMode_Wireframe : B3R_DebugMode_None);
 

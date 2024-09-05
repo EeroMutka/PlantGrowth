@@ -288,6 +288,11 @@ static void ApicalGrowth(Plant* plant, Bud* bud, float vigor) {
 
 				StemSegment new_segment{};
 				DS_ArrPush(&bud->segments, new_segment);
+				
+				IncrementShadowValueClampedSquare(plant, shadow_p.x - 1, shadow_p.x + 1, shadow_p.y - 1, shadow_p.y + 1, shadow_p.z-0, 8);
+				IncrementShadowValueClampedSquare(plant, shadow_p.x - 1, shadow_p.x + 1, shadow_p.y - 1, shadow_p.y + 1, shadow_p.z-1, 6);
+				IncrementShadowValueClampedSquare(plant, shadow_p.x - 2, shadow_p.x + 2, shadow_p.y - 2, shadow_p.y + 2, shadow_p.z-2, 3);
+				IncrementShadowValueClampedSquare(plant, shadow_p.x - 3, shadow_p.x + 3, shadow_p.y - 3, shadow_p.y + 3, shadow_p.z-3, 2);
 			}
 			
 			{
@@ -297,10 +302,6 @@ static void ApicalGrowth(Plant* plant, Bud* bud, float vigor) {
 				last_segment->step_scale += step_scale;
 			}
 
-			IncrementShadowValueClampedSquare(plant, shadow_p.x - 1, shadow_p.x + 1, shadow_p.y - 1, shadow_p.y + 1, shadow_p.z-0, 8);
-			IncrementShadowValueClampedSquare(plant, shadow_p.x - 1, shadow_p.x + 1, shadow_p.y - 1, shadow_p.y + 1, shadow_p.z-1, 6);
-			IncrementShadowValueClampedSquare(plant, shadow_p.x - 2, shadow_p.x + 2, shadow_p.y - 2, shadow_p.y + 2, shadow_p.z-2, 3);
-			IncrementShadowValueClampedSquare(plant, shadow_p.x - 3, shadow_p.x + 3, shadow_p.y - 3, shadow_p.y + 3, shadow_p.z-3, 2);
 			//IncrementShadowValueClampedSquare(plant, shadow_p.x - 4, shadow_p.x + 4, shadow_p.y - 4, shadow_p.y + 4, shadow_p.z-4, 1);
 		
 			UpdateBudSamplePoint(plant, bud);
@@ -475,7 +476,7 @@ static float PlantCalculateLight(Plant* plant, Bud* bud, float* out_width) {
 		// width grows over time as well...
 		//width_linear += 0.0002f*segment->step_scale;
 		//width = 0.1f*sqrtf(width_linear);//Decelerate(width_linear, 50.f);
-		segment->width = sqrtf(Decelerate(total_length, 0.0002f)) * 0.0003f + 0.0005f;
+		segment->width = sqrtf(Decelerate(total_length, 0.0002f)) * 0.0003f + 0.0001f;
 		
 		total_length += segment->step_scale;
 	}

@@ -229,7 +229,7 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n		float3 total = float3(0, 0, 0);
 \n		for (int i = 0; i < 3; i++) {
 \n			float light_softness = light_dirs[i].w;
-\n			total += (dot(n, light_dirs[i].xyz)*(light_softness - 1.f) + light_softness) * albedo * light_colors[i].rgb;
+\n			total += max(dot(n, light_dirs[i].xyz)*(light_softness - 1.f) + light_softness, 0.) * albedo * light_colors[i].rgb;
 \n		}
 \n		//result.rgb *= lightness;
 \n		return float4(total, 1.0);

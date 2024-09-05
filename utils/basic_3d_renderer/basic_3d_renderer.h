@@ -202,7 +202,7 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n	float4 PSMain(PixelData pixel, bool is_front_face : SV_IsFrontFace) : SV_TARGET {
 \n		float face_dir = is_front_face ? -1.f : 1.f; // `is_front_face` seems to have an inverted convertion to ours
 \n	#if defined(B3R_VERT_LAYOUT_POSNORUVCOL)
-\n		float3 n = pixel.normal*face_dir;
+\n		float3 n = pixel.normal;//*face_dir;
 \n	#else
 \n		float3 n = normalize(cross(ddy(pixel.position_ws), ddx(pixel.position_ws)));
 \n	#endif

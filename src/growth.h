@@ -238,11 +238,13 @@ static void ApicalGrowth(Plant* plant, Bud* bud, float vigor) {
 
 		HMM_Vec3 old_dir = HMM_RotateV3({0, 0, 1}, bud_end_rotation);
 
-		HMM_Vec3 optimal_direction = {0, 0, 1};
+		HMM_Vec3 optimal_direction;
 		bool optimal_direction_ok = FindOptimalGrowthDirection(plant, bud_end_point, &optimal_direction);
+		if (!optimal_direction_ok) optimal_direction = old_dir;
 
 		HMM_Vec3 new_dir = HMM_LerpV3(old_dir, 1.f * step_scale, optimal_direction);
-		new_dir.Z -= 0.2f * step_scale;
+		//new_dir.Z -= 0.2f * step_scale;
+		//new_dir.X -= 0.05f * step_scale;
 		new_dir = HMM_NormV3(new_dir);
 
 		HMM_Quat rotator_to_new_dir = HMM_ShortestRotationBetweenUnitVectors(old_dir, new_dir, {0, 0, 1});
@@ -253,13 +255,11 @@ static void ApicalGrowth(Plant* plant, Bud* bud, float vigor) {
 
 		ShadowMapPoint shadow_p = PointToShadowMapSpace(plant, new_end_point);
 
-		if (optimal_direction_ok &&
-			shadow_p.x >= 0 && shadow_p.x < SHADOW_VOLUME_DIM &&
+		if (shadow_p.x >= 0 && shadow_p.x < SHADOW_VOLUME_DIM &&
 			shadow_p.y >= 0 && shadow_p.y < SHADOW_VOLUME_DIM &&
 			shadow_p.z >= 0 && shadow_p.z < SHADOW_VOLUME_DIM)
 		{
 			const float golden_ratio_rad_increment = 1.61803398875f * 3.1415926f * 2.f;
-
 
 			if (bud->segments.length == 0 || DS_ArrPeek(bud->segments).step_scale + step_scale > 1.f) {
 				// Add a lateral bud for the last segment
@@ -310,7 +310,7 @@ static void ApicalGrowth(Plant* plant, Bud* bud, float vigor) {
 
 static void BudGrow(Plant* plant, Bud* bud, float vigor, DS_Arena* temp_arena) {
 	//if (bud->order >= 3) return;
-	//if (bud->order >= 3) return;
+	//if (bud->order >= 2) return;
 	
 	// shed the branch?
 	if (bud->segments.length > 0) {
@@ -350,7 +350,9 @@ static void BudGrow(Plant* plant, Bud* bud, float vigor, DS_Arena* temp_arena) {
 
 		int first_possible_active_bud = 3;
 		if (bud->order == 0) {
-			if (bud->segments.length > 30) apical_control = 0.2f;
+			if (bud->segments.length > 30) {
+				apical_control = 0.f;
+			}
 			first_possible_active_bud = 10;
 			threshold = 0.f;
 		}
@@ -374,13 +376,13 @@ static void BudGrow(Plant* plant, Bud* bud, float vigor, DS_Arena* temp_arena) {
 			bool in_leaf_stage = end_lateral->segments.length == 0;
 			
 			if (in_leaf_stage) {
-				end_lateral->leaf_growth += 0.2f;//0.5f*vigor_after_leaf_growth;
+				end_lateral->leaf_growth += 0.5f*vigor_after_leaf_growth;
 				if (end_lateral->leaf_growth > 1.f) end_lateral->leaf_growth = 1.f;
 				//else vigor_after_leaf_growth *= 0.5f;
 			}
 			
 			// kill leaf?
-			if (end_lateral->segments.length > 4 || segment->width > 0.001f) {
+			if (end_lateral->segments.length > 4 || segment->width > 0.003f) {
 				end_lateral->leaf_growth = 0;
 			}
 		}
@@ -430,7 +432,8 @@ static void BudGrow(Plant* plant, Bud* bud, float vigor, DS_Arena* temp_arena) {
 	}
 }
 
-static void PlantCalculateLight(Plant* plant, Bud* bud) {
+// returns the total length of all segments combined
+static float PlantCalculateLight(Plant* plant, Bud* bud, float* out_width) {
 	ShadowMapPoint shadow_p = bud->end_sample_point;
 	uint8_t val = plant->shadow_volume[shadow_p.z*SHADOW_VOLUME_DIM*SHADOW_VOLUME_DIM + shadow_p.y*SHADOW_VOLUME_DIM + shadow_p.x];
 	
@@ -440,29 +443,47 @@ static void PlantCalculateLight(Plant* plant, Bud* bud) {
 	float max_lightness = total_lightness;
 
 	//const float bud_width = 0.002f;
-	const float bud_width = 0.00025f;
-	float width = bud_width;
+	//const float bud_width = 0.00025f;
+	//float width = bud_width;
+
+	float total_length = 0.f;
+	//float max_total_length = 0.f;
+	//float width_linear = 0.0f;
+	//float width = width_linear;
 
 	for (int i = bud->segments.length - 1; i >= 0; i--) {
 		StemSegment* segment = &bud->segments.data[i];
 		segment->end_total_lightness = total_lightness;
 
 		if (segment->end_lateral) {
-			PlantCalculateLight(plant, segment->end_lateral);
+			float lateral_width = 0.f;
+			total_length += PlantCalculateLight(plant, segment->end_lateral, &lateral_width);
+			//width_linear += lateral_width;
+			//width_linear = HMM_MAX(width, width_linear); // we need to accomodate the lateral
 			
-			float lateral_width = segment->end_lateral->segments.length > 0 ? segment->end_lateral->segments.data[0].width : bud_width;
+			//width = total_length;
+
+			//float lateral_width = segment->end_lateral->segments.length > 0 ? segment->end_lateral->segments.data[0].width : bud_width;
 			//assert(lateral_width >= bud_width);
-			width = sqrtf(width*width + lateral_width*lateral_width);
+			//width = sqrtf(width*width + lateral_width*lateral_width);
 			//width += lateral_width*1.f;
 			
 			max_lightness = HMM_MAX(max_lightness, segment->end_lateral->max_lightness);
 			total_lightness += segment->end_lateral->total_lightness;
 		}
-		segment->width = width;
+
+		// width grows over time as well...
+		//width_linear += 0.0002f*segment->step_scale;
+		//width = 0.1f*sqrtf(width_linear);//Decelerate(width_linear, 50.f);
+		segment->width = sqrtf(Decelerate(total_length, 0.0002f)) * 0.0003f + 0.0005f;
+		
+		total_length += segment->step_scale;
 	}
 	
+	//*out_width = width_linear;
 	bud->total_lightness = total_lightness;
 	bud->max_lightness = max_lightness;
+	return total_length;
 }
 
 static void PlantInit(Plant* plant, DS_Arena* arena) {
@@ -475,13 +496,20 @@ static void PlantInit(Plant* plant, DS_Arena* arena) {
 	DS_ArrInit(&plant->root.segments, arena);
 }
 
-static void PlantDoGrowthIteration(Plant* plant, const PlantParameters* params, DS_Arena* temp_arena) {
-	float vigor_scale = 5.1f;
+// returns "true" if modifications were made
+static bool PlantDoGrowthIteration(Plant* plant, const PlantParameters* params, DS_Arena* temp_arena) {
+	//float vigor_scale = 0.001f;
+	float vigor_scale = 0.01f;
+	
 	//float vigor_scale = 10.f;
-	PlantCalculateLight(plant, &plant->root);
- 	BudGrow(plant, &plant->root, vigor_scale/* * plant->root.total_lightness*/, temp_arena);
+	float _width;
+	float total_length = 10.f + PlantCalculateLight(plant, &plant->root, &_width);
+	if (total_length > 10000.f) return false;
+
+ 	BudGrow(plant, &plant->root, vigor_scale * total_length, temp_arena);
 	plant->age++;
 
+	return true;
 	//if (plant->base) {
 	//	//float total_light = PlantCalculateLight(plant, plant->base);
 	//	//printf("total_light: %f\n", total_light);

@@ -193,7 +193,7 @@ static bool ImportMeshAddMorph(DS_Arena* arena, ImportedMesh* result, cgltf_attr
 		
 			// In GLTF, Y is up, but we want Z up.
 			position = {position.X, -position.Z, position.Y};
-			normal = {normal.X, -normal.Z, normal.Y};
+			normal = {-normal.X, normal.Z, -normal.Y};
 
 			DS_ArrPush(&morph.vertices, {position, normal, uv, 255, 255, 255, 255});
 		}
@@ -347,7 +347,8 @@ static void MeshBuilderAddQuad(MeshIndexList* list, uint32_t a, uint32_t b, uint
 	DS_ArrPush(list, a); DS_ArrPush(list, c); DS_ArrPush(list, d);
 }
 
-static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* indices, ImportedMesh* imported_mesh, const HMM_Vec3* position, const HMM_Mat3* rot_scale, float morph_amount, uint32_t color)
+static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* indices, ImportedMesh* imported_mesh,
+	const HMM_Vec3* position, const HMM_Mat3* rot_scale, const HMM_Vec3* soft_normal, float morph_amount, uint32_t color)
 {
 	ImportedMeshMorphTarget base_morph = DS_ArrGet(imported_mesh->vertices_morphs, 0);
 	
@@ -363,6 +364,8 @@ static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* 
 			vert.position += morph_amount * second_vert.position;
 			vert.normal += morph_amount * second_vert.normal;
 		}
+
+		if (soft_normal) vert.normal = HMM_Lerp(vert.normal, 0.5f, *soft_normal);
 
 		vert.position = *position + HMM_MulM3V3(*rot_scale, vert.position);
 		vert.normal = HMM_MulM3V3(*rot_scale, vert.normal);
@@ -407,8 +410,7 @@ static void RegeneratePlantShadowMapMesh(Plant* plant) {
 	g_has_plant_shadow_map_mesh = true;
 }
 
-static void RegeneratePlantMeshStep(MeshVertexList* vertices, MeshIndexList* indices, Bud* bud) {
-	
+static void RegeneratePlantMeshStep(MeshVertexList* vertices, MeshIndexList* indices, Bud* bud, HMM_Vec3 soft_normal) {
 	if (bud->leaf_growth > 0.f) {
 		// TODO: the leaf generation could be optimized by caching COMPLETE leaves! We could have one mesh which is "complete leaves" mesh, and another which is
 		// "in-progress" stuff + the branches. In fact, we could even cache completed branches! The mesh generation would become a lot faster. We should have them as completely separate renderable meshes as well just so we don't need to do index buffer copy stuff.
@@ -418,9 +420,12 @@ static void RegeneratePlantMeshStep(MeshVertexList* vertices, MeshIndexList* ind
 		// 
 		// We could kill leaves by setting their vertex positions with dead leaves by animating their vertex positions over time to fall on the ground.
 
-		uint32_t green_rgba = 0xFF409060;
+		uint32_t green_rgba = 154 | 170 << 8 | 37 << 16 | 255 << 24;
 		HMM_Mat3 rot_scale = HMM_QToM3(bud->base_rotation, 0.125f);
-		MeshBuilderAddImportedMesh(vertices, indices, &g_imported_mesh_leaf, &bud->base_point, &rot_scale, bud->leaf_growth, green_rgba);
+		
+		//HMM_Vec3 leaf_normal = {0, 0, -1};
+		//if (parent) leaf_normal = HMM_RotateV3({0, 0, -1}, parent->base_rotation);
+		MeshBuilderAddImportedMesh(vertices, indices, &g_imported_mesh_leaf, &bud->base_point, &rot_scale, &soft_normal, bud->leaf_growth, green_rgba);
 	}
 
 	if (bud->segments.length > 0) {
@@ -434,7 +439,8 @@ static void RegeneratePlantMeshStep(MeshVertexList* vertices, MeshIndexList* ind
 			} else {
 				segment = &bud->segments.data[j];
 				if (segment->end_lateral) {
-					RegeneratePlantMeshStep(vertices, indices, segment->end_lateral);
+					HMM_Vec3 lateral_soft_normal = HMM_LerpV3(soft_normal, 0.5f, HMM_RotateV3({0, 0, 1}, segment->end_rotation));
+					RegeneratePlantMeshStep(vertices, indices, segment->end_lateral, lateral_soft_normal);
 				}
 				base_point = segment->end_point;
 			}
@@ -476,7 +482,7 @@ static void RegeneratePlantMeshStep(MeshVertexList* vertices, MeshIndexList* ind
 static void RegeneratePlantMesh() {
 	MeshVertexList vertices = {&g_temp};
 	MeshIndexList indices = {&g_temp};
-	RegeneratePlantMeshStep(&vertices, &indices, &g_plant.root);
+	RegeneratePlantMeshStep(&vertices, &indices, &g_plant.root, {0, 0, 1});
 
 	if (g_has_plant_mesh) {
 		B3R_MeshDeinit(&g_plant_gpu_mesh);
@@ -564,8 +570,8 @@ static void UpdateAndRender() {
 		}
 
 		if (simulating) {
-			PlantDoGrowthIteration(&g_plant, &g_plant_params, &g_temp);
-			RegeneratePlantMesh();
+			bool modified = PlantDoGrowthIteration(&g_plant, &g_plant_params, &g_temp);
+			if (modified) RegeneratePlantMesh();
 		}
 	}
 
@@ -596,11 +602,13 @@ static void UpdateAndRender() {
 	B3R_BeginDrawing(g_dx11_device_context, g_dx11_framebuffer_view, g_dx11_depthbuffer_view, g_camera.cached.clip_from_world, g_camera.cached.position);
 	B3R_DrawWireMesh(&g_grid_mesh, 0.001f, 100000.f, 100000.f, 1.f, 1.f, 1.f, 1.f);
 	
-	B3R_BindDirectionalLight(0, HMM_NormV3({0.1f, 0.2f, -1.f}), 0.7f, {1.f, 1.f, 1.f});
+	B3R_BindDirectionalLight(0, HMM_NormV3({0.5f, -0.4f, -1.f}), 0.2f, 0.8f*HMM_Vec3{1.f, 0.9f, 0.7f});
+	B3R_BindDirectionalLight(1, HMM_NormV3({0.f, 0.f, 1.f}), 0.7f, 1.5f*HMM_Vec3{0.5f, 0.6f, 0.6f});
 	B3R_BindTexture(NULL);
 	B3R_DrawMesh(&g_plant_gpu_mesh, wireframe ? B3R_DebugMode_Wireframe : B3R_DebugMode_None);
 
 	B3R_BindDirectionalLight(0, {}, 1.f, {1.f, 1.f, 1.f});
+	B3R_BindDirectionalLight(1, {}, 0.f, {0.f, 0.f, 0.f});
 	B3R_BindTexture(&g_texture_skybox);
 	B3R_DrawMesh(&g_mesh_skybox, B3R_DebugMode_None);
 	

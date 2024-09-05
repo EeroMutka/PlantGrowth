@@ -605,26 +605,35 @@ static void UpdateAndRender() {
 	UI_EndFrame(&ui_outputs);
 	
 	FLOAT clearcolor[4] = { 0.5f, 0.5f, 0.5f, 1.f };
+	//FLOAT clearcolor[4] = { 0.9f, 0.9f, 0.9f, 1.f };
 	g_dx11_device_context->ClearRenderTargetView(g_dx11_framebuffer_view, clearcolor);
 	g_dx11_device_context->ClearDepthStencilView(g_dx11_depthbuffer_view, D3D11_CLEAR_DEPTH, 1.0f, 0);
 	
 	// -- B3R drawing -----------------------------
 	B3R_BeginDrawing(g_dx11_device_context, g_dx11_framebuffer_view, g_dx11_depthbuffer_view, g_camera.cached.clip_from_world, g_camera.cached.position);
-	B3R_DrawWireMesh(&g_grid_mesh, 0.001f, 100000.f, 100000.f, 1.f, 1.f, 1.f, 1.f);
+	B3R_DrawWireMesh(&g_grid_mesh, 0.0003f, 100000.f, 100000.f, 1.f, 1.f, 1.f, 1.f);
 	
 	//B3R_BindDirectionalLight(0, HMM_NormV3({0.5f, -0.4f, -1.f}), 0.5f, 0.5f*HMM_Vec3{1.f, 0.9f, 0.7f});
 	B3R_BindDirectionalLight(0, HMM_NormV3({1.f, 0.f, -1.f}), 0.6f, 0.3f*HMM_Vec3{1.f, 0.9f, 0.7f});
 	B3R_BindDirectionalLight(1, HMM_NormV3({0.f, 0.f, -1.f}), 0.8f, 1.f*HMM_Vec3{0.55f, 0.6f, 0.6f});
 	B3R_BindTexture(NULL);
-	B3R_DrawMesh(&g_plant_gpu_mesh, wireframe ? B3R_DebugMode_Wireframe : B3R_DebugMode_None);
+	B3R_DrawMesh(&g_plant_gpu_mesh, wireframe ? B3R_DebugMode_Wireframe : B3R_DebugMode_None, NULL, {});
+	
+	// Shadow rendering hack
+	{
+		HMM_Mat4 shadow_mat = HMM_Scale({1, 1, 0});
+		B3R_BindDirectionalLight(0, {}, 1.f, {1.f, 1.f, 1.f});
+		B3R_BindDirectionalLight(1, {}, 0.f, {0.f, 0.f, 0.f});
+		B3R_DrawMesh(&g_plant_gpu_mesh, wireframe ? B3R_DebugMode_Wireframe : B3R_DebugMode_None, &shadow_mat, HMM_Vec4{0.25f, 0.25f, 0.25f, 1});
+	}
 
 	B3R_BindDirectionalLight(0, {}, 1.f, {1.f, 1.f, 1.f});
 	B3R_BindDirectionalLight(1, {}, 0.f, {0.f, 0.f, 0.f});
-	B3R_BindTexture(&g_texture_skybox);
-	B3R_DrawMesh(&g_mesh_skybox, B3R_DebugMode_None);
+	//B3R_BindTexture(&g_texture_skybox);
+	//B3R_DrawMesh(&g_mesh_skybox, B3R_DebugMode_None);
 	
 	if (visualize_shadow_map) {
-		B3R_DrawMesh(&g_plant_shadow_map_mesh, B3R_DebugMode_None);
+		B3R_DrawMesh(&g_plant_shadow_map_mesh, B3R_DebugMode_None, NULL, {});
 	}
 
 	B3R_EndDrawing();
@@ -750,7 +759,7 @@ static void InitGridMesh(B3R_WireMesh* mesh) {
 	UI_Color y_axis_color = UI_MakeColorF(0.15f, 1.f, 0.15f, 1.f);
 
 	DS_DynArray(WireVertex) wire_verts = {&g_temp};
-	int grid_extent = 5;
+	int grid_extent = 25;
 
 	float cell_size = 0.1f;
 	HMM_Vec3 origin = {0, 0, 0};
@@ -788,7 +797,6 @@ static void TextureInitFromFile(B3R_Texture* texture, const char* filepath) {
 
 int main() {
 	InitApp();
-	
 
 	g_camera.pos.Y = -0.6f;
 	g_camera.pos.Z = 0.3f;
@@ -802,7 +810,7 @@ int main() {
 	g_imported_mesh_unit_cube = ImportMesh(&g_persist, "../resources/unit_cube.glb");
 	
 	MeshInitFromFile(&g_mesh_skybox, "../resources/skysphere.glb");
-	TextureInitFromFile(&g_texture_skybox, "../resources/skysphere_texture.png");
+	//TextureInitFromFile(&g_texture_skybox, "../resources/skysphere_texture.png");
 
 	while (!OS_WINDOW_ShouldClose(&g_window)) {
 		DS_ArenaReset(&g_temp);
@@ -817,7 +825,7 @@ int main() {
 		UpdateAndRender();
 	}
 	
-	B3R_TextureDeinit(&g_texture_skybox);
+	//B3R_TextureDeinit(&g_texture_skybox);
 	B3R_MeshDeinit(&g_mesh_skybox);
 
 	B3R_WireMeshDeinit(&g_grid_mesh);

@@ -241,9 +241,13 @@ static void ApicalGrowth(Plant* plant, Bud* bud, float vigor) {
 		HMM_Vec3 optimal_direction;
 		bool optimal_direction_ok = FindOptimalGrowthDirection(plant, bud_end_point, &optimal_direction);
 		if (!optimal_direction_ok) optimal_direction = old_dir;
-
+		
+		// Twist
+		optimal_direction += HMM_RotateV3({0.1f, 0, 0}, bud_end_rotation);
+		//optimal_direction += HMM_RotateV3({0.f, 0.1f, 0}, bud_end_rotation);
+		
 		HMM_Vec3 new_dir = HMM_LerpV3(old_dir, 1.f * step_scale, optimal_direction);
-		//new_dir.Z -= 0.2f * step_scale;
+		new_dir.Z -= 0.2f * step_scale;
 		//new_dir.X -= 0.05f * step_scale;
 		new_dir = HMM_NormV3(new_dir);
 
@@ -351,21 +355,26 @@ static void BudGrow(Plant* plant, Bud* bud, float vigor, DS_Arena* temp_arena) {
 
 		int first_possible_active_bud = 3;
 		if (bud->order == 0) {
-			if (bud->segments.length > 30) {
+			if (bud->segments.length > 20) {
 				apical_control = 0.f;
 			}
 			first_possible_active_bud = 10;
-			threshold = 0.f;
+			threshold = 0.5f;
 		}
 		if (bud->order == 1) {
 			apical_control = 0.8f;
 			if (bud->segments.length > 4) apical_control = 0.3f;
-			threshold = 0.f;
+			threshold = 0.5f;
 		}
-		if (bud->order >= 2) {
+		if (bud->order == 2) {
 			apical_control = 0.2f;
 			//first_possible_active_bud = 0;
 			threshold = 0.2f;
+		}
+		if (bud->order >= 3) {
+			apical_control = 1.f;
+			//first_possible_active_bud = 0;
+			threshold = 1.f;
 		}
 
 		float vigor_after_leaf_growth = vigor;
@@ -383,7 +392,7 @@ static void BudGrow(Plant* plant, Bud* bud, float vigor, DS_Arena* temp_arena) {
 			}
 			
 			// kill leaf?
-			if (end_lateral->segments.length > 4 || segment->width > 0.003f) {
+			if (end_lateral->segments.length > 3 || segment->width > 0.0015f) {
 				end_lateral->leaf_growth = 0;
 			}
 		}
@@ -450,7 +459,7 @@ static float PlantCalculateLight(Plant* plant, Bud* bud, float* out_width) {
 	float total_length = 0.f;
 	//float max_total_length = 0.f;
 	//float width_linear = 0.0f;
-	//float width = width_linear;
+	float width = 0.f;
 
 	for (int i = bud->segments.length - 1; i >= 0; i--) {
 		StemSegment* segment = &bud->segments.data[i];
@@ -476,7 +485,8 @@ static float PlantCalculateLight(Plant* plant, Bud* bud, float* out_width) {
 		// width grows over time as well...
 		//width_linear += 0.0002f*segment->step_scale;
 		//width = 0.1f*sqrtf(width_linear);//Decelerate(width_linear, 50.f);
-		segment->width = sqrtf(Decelerate(total_length, 0.0002f)) * 0.0003f + 0.0001f;
+		//segment->width = sqrtf(Decelerate(total_length, 0.0002f)) * 0.0003f + 0.0001f;
+		segment->width = sqrtf(total_length) * 0.0003f + 0.0001f;
 		
 		total_length += segment->step_scale;
 	}
@@ -500,12 +510,13 @@ static void PlantInit(Plant* plant, DS_Arena* arena) {
 // returns "true" if modifications were made
 static bool PlantDoGrowthIteration(Plant* plant, const PlantParameters* params, DS_Arena* temp_arena) {
 	//float vigor_scale = 0.001f;
-	float vigor_scale = 0.01f;
+	//float vigor_scale = 0.01f;
+	float vigor_scale = 0.005f;
 	
 	//float vigor_scale = 10.f;
 	float _width;
 	float total_length = 10.f + PlantCalculateLight(plant, &plant->root, &_width);
-	if (total_length > 10000.f) return false;
+	if (total_length > 2000.f) return false;
 
  	BudGrow(plant, &plant->root, vigor_scale * total_length, temp_arena);
 	plant->age++;

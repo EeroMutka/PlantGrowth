@@ -88,7 +88,7 @@ static void B3R_BindTexture(B3R_Texture* texture);
 // that it's as if there is no lighting in the world.
 static void B3R_BindDirectionalLight(int index, HMM_Vec3 direction, float softness, HMM_Vec3 color);
 
-static void B3R_DrawMesh(const B3R_Mesh* mesh, B3R_DebugMode debug_mode);
+static void B3R_DrawMesh(const B3R_Mesh* mesh, B3R_DebugMode debug_mode, const HMM_Mat4* model_to_world, HMM_Vec4 vertex_color_override);
 static void B3R_DrawWireMesh(const B3R_WireMesh* mesh,
 	float thickness, float fade_dist_min, float fade_dist_max,
 	float r, float g, float b, float a);
@@ -97,6 +97,7 @@ static void B3R_DrawWireMesh(const B3R_WireMesh* mesh,
 
 typedef struct B3R_Constants {
 	HMM_Mat4 clip_from_world;
+	HMM_Vec4 vertex_color_override;
 	HMM_Vec3 camera_pos;
 	float wire_thickness;
 	float wire_color[4];
@@ -122,6 +123,7 @@ typedef struct B3R_State {
 	ID3D11Buffer* constant_buffer;
 	B3R_Texture default_white_texture;
 
+	HMM_Mat4 clip_from_world;
 	B3R_Constants constants;
 	ID3D11DeviceContext* dc; // only valid in between BeginDrawing and EndDrawing
 } B3R_State;
@@ -133,6 +135,7 @@ static B3R_State B3R_STATE;
 static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n	cbuffer constants : register(b0) {
 \n		float4x4 clip_from_world;
+\n		float4 vertex_color_override;
 \n		float3 camera_pos;
 \n		float wire_thickness;
 \n		float4 wire_color;
@@ -170,7 +173,7 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n	#if defined(B3R_VERT_LAYOUT_POSNORUVCOL)
 \n		output.normal = normalize(vertex.normal);
 \n		output.uv = vertex.uv;
-\n		output.color = vertex.color;
+\n		output.color = lerp(vertex.color, float4(vertex_color_override.rgb, 1), vertex_color_override.a);
 \n	#endif
 \n		return output;
 \n	}
@@ -245,6 +248,7 @@ static const char B3R_SHADER_SRC[] = B3R_MULTILINE_STR(
 static const char B3R_WIRE_SHADER_SRC[] = B3R_MULTILINE_STR(
 \n	cbuffer constants : register(b0) {
 \n		float4x4 clip_from_world;
+\n		float4 vertex_color_override;
 \n		float3 camera_pos;
 \n		float wire_thickness;
 \n		float4 wire_color;
@@ -538,6 +542,7 @@ static void B3R_BeginDrawing(ID3D11DeviceContext* dc,
 	HMM_Mat4 clip_from_world, HMM_Vec3 camera_pos)
 {
 	B3R_STATE.dc = dc;
+	B3R_STATE.clip_from_world = clip_from_world;
 	
 	// D3D11_VIEWPORT viewport = { 0.0f, 0.0f, UI_STATE.window_size.x, UI_STATE.window_size.y, 0.0f, 1.0f };
 
@@ -604,8 +609,13 @@ static void B3R_BindDirectionalLight(int index, HMM_Vec3 direction, float softne
 }
 
 
-static void B3R_DrawMesh(const B3R_Mesh* mesh, B3R_DebugMode debug_mode) {
+static void B3R_DrawMesh(const B3R_Mesh* mesh, B3R_DebugMode debug_mode, const HMM_Mat4* model_to_world, HMM_Vec4 vertex_color_override) {
 	B3R_STATE.constants.debug_mode = (int)debug_mode;
+	B3R_STATE.constants.clip_from_world = B3R_STATE.clip_from_world;
+	if (model_to_world) {
+		B3R_STATE.constants.clip_from_world = HMM_MulM4(B3R_STATE.clip_from_world, *model_to_world);
+	}
+	B3R_STATE.constants.vertex_color_override = vertex_color_override;
 	B3R_UpdateConstants();
 
 	if (debug_mode == B3R_DebugMode_Wireframe) {

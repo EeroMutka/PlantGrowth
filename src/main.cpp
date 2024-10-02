@@ -281,10 +281,9 @@ static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* 
 			vert.normal += morph_amount * second_vert.normal;
 		}
 
-
 		vert.position = *position + HMM_MulM3V3(*rot_scale, vert.position);
 		vert.normal = HMM_MulM3V3(*rot_scale, vert.normal);
-		
+
 		vert.color_rgba = color;
 		DS_ArrPush(vertices, vert);
 	}
@@ -312,7 +311,6 @@ static void RegeneratePlantMeshStep(Plant* plant, MeshVertexList* vertices, Mesh
 		uint32_t color_u32 = (uint32_t)color.R | (uint32_t)color.G << 8 | (uint32_t)color.B << 16 | 255 << 24;
 
 		HMM_Mat3 rot_scale = HMM_QToM3(bud->base_rotation, 0.125f);
-		
 		MeshBuilderAddImportedMesh(vertices, indices, &g_imported_mesh_leaf, &bud->base_point, &rot_scale, bud->leaf_growth, color_u32);
 	}
 
@@ -361,7 +359,6 @@ static void RegeneratePlantMeshStep(Plant* plant, MeshVertexList* vertices, Mesh
 					MeshBuilderAddQuad(indices, prev_circle_first_vertex + k, prev_circle_first_vertex + next_k, first_vertex + next_k, first_vertex + k);
 				}
 			}
-
 
 			prev_circle_first_vertex = first_vertex;
 		}

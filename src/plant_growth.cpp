@@ -5,6 +5,10 @@
 
 #include "plant_growth.h"
 
+// -- Constants ---------------------------------------------------------------
+#define SHADOW_VOLUME_SIZE 64
+// ----------------------------------------------------------------------------
+
 // Decelerate the function `y = x` with the strength of `f`.
 // The result comes to a full stop at `x = 1 / f` when `f > 0`.
 // https://www.desmos.com/calculator/ncskawbzlg
@@ -29,30 +33,14 @@ static float Approach(float x, float target, float speed) {
 	return 0.f;
 }
 
-struct RandomGenerator {
-	uint64_t state, inc;
-};
-
-uint32_t RandomU32(RandomGenerator* rng) {
-	// Minimal PCG32 code / (c) 2014 M.E. O'Neill / pcg-random.org
-	// Licensed under Apache License 2.0 (NO WARRANTY, etc. see website)
-	uint64_t oldstate = rng->state;
-	rng->state = oldstate * 6364136223846793005ULL + (rng->inc|1);
-	uint32_t xorshifted = (uint32_t)(((oldstate >> 18u) ^ oldstate) >> 27u);
-	uint32_t rot = oldstate >> 59u;
-	return (xorshifted >> rot) | (xorshifted << ((0 - rot) & 31));
+static uint32_t RandomU32(uint32_t seed) { // pcg_hash from https://www.reedbeta.com/blog/hash-functions-for-gpu-rendering/
+	uint32_t state = seed * 747796405u + 2891336453u;
+	uint32_t word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+	return (word >> 22u) ^ word;
 }
 
-static RandomGenerator RandomInit(uint64_t seed) {
-	RandomGenerator rng = {0, (seed << 1) | 1};
-	RandomU32(&rng);
-	rng.state += seed;
-	RandomU32(&rng);
-	return rng;
-}
-
-static float RandomFloat(RandomGenerator* rng, float min, float max) {
-	return min + (RandomU32(rng) / (float)UINT_MAX) * (max - min);
+static float RandomFloat(uint32_t seed, float min, float max) {
+	return min + (RandomU32(seed) / (float)0xFFFFFFFF) * (max - min);
 }
 
 static void IncrementShadowValue(Plant* plant, int x, int y, int z, uint8_t amount) {
@@ -77,8 +65,8 @@ static void IncrementShadowValueClampedSquare(Plant* plant, int min_x, int max_x
 }
 
 static ShadowMapPoint PointToShadowMapSpace(Plant* plant, HMM_Vec3 point) {
-	int x = (int)((point.X + plant->shadow_volume_half_extent) * SHADOW_VOLUME_SIZE);
-	int y = (int)((point.Y + plant->shadow_volume_half_extent) * SHADOW_VOLUME_SIZE);
+	int x = (int)((point.X + 0.5f) * SHADOW_VOLUME_SIZE);
+	int y = (int)((point.Y + 0.5f) * SHADOW_VOLUME_SIZE);
 	int z = (int)((point.Z) * SHADOW_VOLUME_SIZE);
 	return {x, y, z};
 }
@@ -209,7 +197,7 @@ static void ApicalGrowth(Plant* plant, Bud* bud, float vigor) {
 	}
 }
 
-static void BudGrow(Plant* plant, Bud* bud, float vigor, DS_Arena* temp_arena) {
+static void BudGrow(Plant* plant, DS_Arena* temp, Bud* bud, float vigor, const PlantParameters* params) {
 	//if (bud->order >= 3) return;
 	//if (bud->order >= 2) return;
 	
@@ -236,7 +224,7 @@ static void BudGrow(Plant* plant, Bud* bud, float vigor, DS_Arena* temp_arena) {
 		float threshold = 0.2f;
 		HMM_Vec3 prev_active_bud_direction = {0, 0, -1};
 
-		DS_DynArray(Bud*) active_buds = {temp_arena};
+		DS_DynArray(Bud*) active_buds = {temp};
 
 		// Why does a birch tree want a bit of extra space at the bottom?
 		// A: so that the first branches won't need to compete with bushes and ground plants
@@ -305,8 +293,7 @@ static void BudGrow(Plant* plant, Bud* bud, float vigor, DS_Arena* temp_arena) {
 
 			// for now, ignore the lightness and just say it's totally random.
 
-			RandomGenerator rng = RandomInit(end_lateral->id);
-			float bud_random_strength_bias = RandomFloat(&rng, 0.f, 1.f);
+			float bud_random_strength_bias = RandomFloat(params->random_seed + end_lateral->id, 0.f, 1.f);
 
 			// is this an active bud?
 			if (/*end_lateral->max_lightness + */bud_random_strength_bias > threshold &&
@@ -331,7 +318,7 @@ static void BudGrow(Plant* plant, Bud* bud, float vigor, DS_Arena* temp_arena) {
 		// how much vigor to give to lateral buds?
 		for (int i = 0; i < active_buds.count; i++) {
 			Bud* lateral_bud = active_buds.data[i];
-			BudGrow(plant, lateral_bud, v_lateral, temp_arena);
+			BudGrow(plant, temp, lateral_bud, v_lateral, params);
 		}
 
 		ApicalGrowth(plant, bud, v_main);
@@ -394,24 +381,21 @@ static float PlantCalculateLight(Plant* plant, Bud* bud, float* out_width) {
 }
 
 void PlantInit(Plant* plant, DS_Arena* arena) {
-	memset(plant, 0, sizeof(*plant));
+	*plant = {};
 	plant->arena = arena;
 	plant->root.id = plant->next_bud_id++;
 	plant->root.base_point = {0.5f/SHADOW_VOLUME_SIZE, 0.5f/SHADOW_VOLUME_SIZE, 0.5f/SHADOW_VOLUME_SIZE};
 	plant->root.base_rotation = {0, 0, 0, 1};
-	plant->shadow_volume_half_extent = 0.5f;
+	plant->shadow_volume = (uint8_t*)DS_ArenaPushZero(arena, SHADOW_VOLUME_SIZE * SHADOW_VOLUME_SIZE * SHADOW_VOLUME_SIZE * sizeof(uint8_t));
 	DS_ArrInit(&plant->root.segments, arena);
 }
 
-// returns true if modifications were made
 bool PlantDoGrowthIteration(Plant* plant, DS_Arena* temp, const PlantParameters* params) {
-	float vigor_scale = 0.005f;
-	
 	float _width;
 	float total_length = 10.f + PlantCalculateLight(plant, &plant->root, &_width);
-	if (total_length > 2000.f) return false;
+	if (total_length > params->max_age) return false;
 
- 	BudGrow(plant, &plant->root, vigor_scale * total_length, temp);
+ 	BudGrow(plant, temp, &plant->root, params->vigor_scale * total_length, params);
 	plant->age++;
 
 	return true;

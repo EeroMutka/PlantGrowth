@@ -84,8 +84,8 @@ struct SimpleGPUMesh {
 
 //// Globals ///////////////////////////////////////////////
 
-static UI_Vec2 g_window_size = {1920, 1080};
-static bool g_window_fullscreen = true;
+static UI_Vec2 g_window_size = {1000, 800};
+static bool g_window_fullscreen = false;
 static OS_WINDOW g_window;
 
 static ID3D11Device* g_dx11_device;
@@ -97,18 +97,16 @@ static ID3D11DepthStencilView* g_dx11_depthbuffer_view;
 
 static UI_FontIndex g_base_font, g_icons_font;
 
-static Input_Frame g_inputs;
-static DS_Arena g_persist;
-static DS_Arena g_temp;
+static INPUT_Frame g_inputs;
+static DS_Arena g_persist_arena;
+static DS_Arena g_temp_arena;
 
 static Camera g_camera;
 
-static PlantParameters g_plant_params;
+static PlantParameters g_plant_params = {};
 static DS_Arena g_plant_arena;
 static Plant g_plant;
 
-static bool g_has_plant_shadow_map_mesh;
-static B3R_Mesh g_plant_shadow_map_mesh;
 static bool g_has_plant_mesh;
 static B3R_Mesh g_plant_gpu_mesh;
 
@@ -250,7 +248,7 @@ static ImportedMesh ImportMesh(DS_Arena* arena, const char* filepath) {
 }
 
 static void MeshInitFromFile(B3R_Mesh* result, const char* filepath) {
-	ImportedMesh mesh = ImportMesh(&g_temp, filepath);
+	ImportedMesh mesh = ImportMesh(&g_temp_arena, filepath);
 	ImportedMeshMorphTarget main_morph = DS_ArrGet(mesh.vertices_morphs, 0);
 	B3R_MeshInit(result, B3R_VertexLayout_PosNorUVCol, main_morph.vertices.data, main_morph.vertices.count, mesh.indices.data, mesh.indices.count);
 }
@@ -366,8 +364,8 @@ static void RegeneratePlantMeshStep(Plant* plant, MeshVertexList* vertices, Mesh
 }
 
 static void RegeneratePlantMesh() {
-	MeshVertexList vertices = {&g_temp};
-	MeshIndexList indices = {&g_temp};
+	MeshVertexList vertices = {&g_temp_arena};
+	MeshIndexList indices = {&g_temp_arena};
 	RegeneratePlantMeshStep(&g_plant, &vertices, &indices, &g_plant.root);
 
 	if (g_has_plant_mesh) {
@@ -386,7 +384,7 @@ static void UpdateAndRender() {
 	vp.window_size_inv = {1.f/g_window_size.x, 1.f/g_window_size.y};
 
 	UI_Inputs ui_inputs{};
-	UI_Input_ApplyInputs(&ui_inputs, &g_inputs);
+	UI_INPUT_ApplyInputs(&ui_inputs, &g_inputs);
 	OS_WINDOW_GetMousePosition(&g_window, &ui_inputs.mouse_position.x, &ui_inputs.mouse_position.y);
 
 	UI_BeginFrame(&ui_inputs, g_window_size, {g_base_font, 18}, {g_icons_font, 18});
@@ -399,11 +397,12 @@ static void UpdateAndRender() {
 	memcpy(&plant_params_old, &g_plant_params, sizeof(PlantParameters)); // use memcpy to copy any compiler-introduced padding bytes as well
 
 	static bool wireframe = false;
-	static bool visualize_shadow_map = false;
-	UI_AddFmt(UI_KEY(), "Visualize shadow map: %!b", &visualize_shadow_map);
 	UI_AddFmt(UI_KEY(), "Wireframe: %!b", &wireframe);
+	UI_AddFmt(UI_KEY(), "Seed: %!u", &g_plant_params.random_seed);
+	UI_AddFmt(UI_KEY(), "Max age: %!f", &g_plant_params.max_age);
+	UI_AddFmt(UI_KEY(), "Vigor scale: %!f", &g_plant_params.vigor_scale);
+
 	/*
-	UI_AddFmt(UI_KEY(), "Step size: %!f", &g_plant_params.step_size);
 	UI_AddFmt(UI_KEY(), "Age: %!f", &g_plant_params.age);
 	//UI_AddFmt(UI_KEY(), "Growth scale: %!f", &g_plant_params.growth_scale);
 	//UI_AddFmt(UI_KEY(), "Growth speed: %!f", &g_plant_params.growth_speed);
@@ -454,7 +453,7 @@ static void UpdateAndRender() {
 		}
 
 		if (simulating) {
-			bool modified = PlantDoGrowthIteration(&g_plant, &g_temp, &g_plant_params);
+			bool modified = PlantDoGrowthIteration(&g_plant, &g_temp_arena, &g_plant_params);
 			if (modified) RegeneratePlantMesh();
 		}
 	}
@@ -480,7 +479,6 @@ static void UpdateAndRender() {
 	B3R_BeginDrawing(g_dx11_device_context, g_dx11_framebuffer_view, g_dx11_depthbuffer_view, g_camera.cached.clip_from_world, g_camera.cached.position);
 	B3R_DrawWireMesh(&g_grid_mesh, 0.0003f, 100000.f, 100000.f, 1.f, 1.f, 1.f, 1.f);
 	
-	//B3R_BindDirectionalLight(0, HMM_NormV3({0.5f, -0.4f, -1.f}), 0.5f, 0.5f*HMM_Vec3{1.f, 0.9f, 0.7f});
 	B3R_BindDirectionalLight(0, HMM_NormV3({1.f, 0.f, -1.f}), 0.6f, 0.3f*HMM_Vec3{1.f, 0.9f, 0.7f});
 	B3R_BindDirectionalLight(1, HMM_NormV3({0.f, 0.f, -1.f}), 0.8f, 1.f*HMM_Vec3{0.55f, 0.6f, 0.6f});
 	B3R_BindTexture(NULL);
@@ -497,10 +495,6 @@ static void UpdateAndRender() {
 	B3R_BindDirectionalLight(0, {}, 1.f, {1.f, 1.f, 1.f});
 	B3R_BindDirectionalLight(1, {}, 0.f, {0.f, 0.f, 0.f});
 	
-	if (visualize_shadow_map) {
-		B3R_DrawMesh(&g_plant_shadow_map_mesh, B3R_DebugMode_None, NULL, {});
-	}
-
 	B3R_EndDrawing();
 
 	UI_DX11_Draw(&ui_outputs, g_dx11_framebuffer_view);
@@ -551,11 +545,11 @@ static void OnResizeWindow(uint32_t width, uint32_t height, void *user_ptr) {
 }
 
 static void InitApp() {
-	DS_ArenaInit(&g_persist, 4096, DS_HEAP);
-	DS_ArenaInit(&g_temp, 4096, DS_HEAP);
+	DS_ArenaInit(&g_persist_arena, 4096, DS_HEAP);
+	DS_ArenaInit(&g_temp_arena, 4096, DS_HEAP);
 
 	g_window = OS_WINDOW_Create((uint32_t)g_window_size.x, (uint32_t)g_window_size.y, "Plant growth");
-	OS_WINDOW_SetFullscreen(&g_window, g_window_fullscreen);
+	//OS_WINDOW_SetFullscreen(&g_window, g_window_fullscreen);
 
 	D3D_FEATURE_LEVEL dx_feature_levels[] = { D3D_FEATURE_LEVEL_11_0 };
 
@@ -583,11 +577,11 @@ static void InitApp() {
 
 	UI_Backend ui_backend = {0};
 	UI_DX11_Init(&ui_backend, g_dx11_device, g_dx11_device_context);
-	UI_Init(&g_persist, &ui_backend);
+	UI_Init(&g_persist_arena, &ui_backend);
 
 	// NOTE: the font data must remain alive across the whole program lifetime!
-	STR_View roboto_mono_ttf = ReadEntireFile(&g_persist, "../fire/fire_ui/resources/roboto_mono.ttf");
-	STR_View icons_ttf = ReadEntireFile(&g_persist, "../fire/fire_ui/resources/fontello/font/fontello.ttf");
+	STR_View roboto_mono_ttf = ReadEntireFile(&g_persist_arena, "../fire/fire_ui/resources/roboto_mono.ttf");
+	STR_View icons_ttf = ReadEntireFile(&g_persist_arena, "../fire/fire_ui/resources/fontello/font/fontello.ttf");
 
 	g_base_font = UI_FontInit(roboto_mono_ttf.data, -4.f);
 	g_icons_font = UI_FontInit(icons_ttf.data, -2.f);
@@ -609,8 +603,8 @@ static void DeinitApp() {
 	g_dx11_device->Release();
 	g_dx11_device_context->Release();
 
-	DS_ArenaDeinit(&g_persist);
-	DS_ArenaDeinit(&g_temp);
+	DS_ArenaDeinit(&g_persist_arena);
+	DS_ArenaDeinit(&g_temp_arena);
 }
 
 static void InitGrid(B3R_WireMesh* mesh, HMM_Vec3 origin, HMM_Vec3 x_step, HMM_Vec3 y_step, int grid_extent, UI_Color grid_color) {
@@ -618,7 +612,7 @@ static void InitGrid(B3R_WireMesh* mesh, HMM_Vec3 origin, HMM_Vec3 x_step, HMM_V
 	UI_Color y_axis_color = UI_MakeColorF(0.15f, 1.f, 0.15f, 1.f);
 
 	struct WireVertex { HMM_Vec3 position; UI_Color color; };
-	DS_DynArray(WireVertex) wire_verts = {&g_temp};
+	DS_DynArray(WireVertex) wire_verts = {&g_temp_arena};
 
 	HMM_Vec3 x_origin_a = origin + y_step * -(float)grid_extent;
 	HMM_Vec3 x_origin_b = origin + y_step * (float)grid_extent;
@@ -659,19 +653,22 @@ int main() {
 
 	InitGrid(&g_grid_mesh, {0, 0, 0}, {0.1f, 0, 0}, {0, 0.1f, 0}, 25, UI_MakeColorF(0.6f, 0.6f, 0.6f, 1.f));
 	
-	g_imported_mesh_leaf = ImportMesh(&g_persist, "../resources/leaf_with_morph_targets.glb");
-	g_imported_mesh_bud = ImportMesh(&g_persist, "../resources/bud.glb");
-	g_imported_mesh_unit_cube = ImportMesh(&g_persist, "../resources/unit_cube.glb");
+	g_imported_mesh_leaf = ImportMesh(&g_persist_arena, "../resources/leaf_with_morph_targets.glb");
+	g_imported_mesh_bud = ImportMesh(&g_persist_arena, "../resources/bud.glb");
+	g_imported_mesh_unit_cube = ImportMesh(&g_persist_arena, "../resources/unit_cube.glb");
 	
 	while (!OS_WINDOW_ShouldClose(&g_window)) {
-		DS_ArenaReset(&g_temp);
+		DS_ArenaReset(&g_temp_arena);
 
-		Input_OS_Events input_events;
-		Input_OS_BeginEvents(&input_events, &g_inputs, &g_temp);
-		for (OS_WINDOW_Event event; OS_WINDOW_PollEvent(&g_window, &event, OnResizeWindow, NULL);) {
-			Input_OS_AddEvent(&input_events, &event);
+		// Poll events and populate the `g_inputs` structure
+		{
+			INPUT_OS_Events input_events;
+			INPUT_OS_BeginEvents(&input_events, &g_inputs, &g_temp_arena);
+			for (OS_WINDOW_Event event; OS_WINDOW_PollEvent(&g_window, &event, OnResizeWindow, NULL);) {
+				INPUT_OS_AddEvent(&input_events, &event);
+			}
+			INPUT_OS_EndEvents(&input_events);
 		}
-		Input_OS_EndEvents(&input_events);
 
 		UpdateAndRender();
 	}

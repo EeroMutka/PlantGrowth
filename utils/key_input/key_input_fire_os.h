@@ -1,10 +1,10 @@
 
-typedef struct Input_OS_Events {
-	Input_Frame* frame;
-	DS_DynArray(Input_Event) events;
-} Input_OS_Events;
+typedef struct INPUT_OS_Events {
+	INPUT_Frame* frame;
+	DS_DynArray(INPUT_Event) events;
+} INPUT_OS_Events;
 
-static void Input_OS_BeginEvents(Input_OS_Events* state, Input_Frame* frame, DS_Arena* frame_arena) {
+static void INPUT_OS_BeginEvents(INPUT_OS_Events* state, INPUT_Frame* frame, DS_Arena* frame_arena) {
 	memset(state, 0, sizeof(*state));
 	state->frame = frame;
 	state->frame->mouse_wheel_input[0] = 0.f;
@@ -14,33 +14,33 @@ static void Input_OS_BeginEvents(Input_OS_Events* state, Input_Frame* frame, DS_
 	DS_ArrInit(&state->events, frame_arena);
 }
 
-static void Input_OS_EndEvents(Input_OS_Events* state) {
+static void INPUT_OS_EndEvents(INPUT_OS_Events* state) {
 	state->frame->events = state->events.data;
 	state->frame->events_count = state->events.count;
 }
 
-static void Input_OS_AddEvent(Input_OS_Events* state, const OS_WINDOW_Event* event) {
+static void INPUT_OS_AddEvent(INPUT_OS_Events* state, const OS_WINDOW_Event* event) {
 	if (event->kind == OS_WINDOW_EventKind_Press) {
-		Input_Key key = (Input_Key)event->key; // NOTE: OS_Key and Input_Key must be kept in sync!
+		INPUT_Key key = (INPUT_Key)event->key; // NOTE: OS_Key and INPUT_Key must be kept in sync!
 		state->frame->key_is_down[event->key] = true;
 		
-		Input_Event input_event = {0};
-		input_event.kind = event->is_repeat ? Input_EventKind_Repeat : Input_EventKind_Press;
+		INPUT_Event input_event = {0};
+		input_event.kind = event->is_repeat ? INPUT_EventKind_Repeat : INPUT_EventKind_Press;
 		input_event.key = key;
 		DS_ArrPush(&state->events, input_event);
 	}
 	if (event->kind == OS_WINDOW_EventKind_Release) {
-		Input_Key key = (Input_Key)event->key; // NOTE: OS_Key and Input_Key must be kept in sync!
+		INPUT_Key key = (INPUT_Key)event->key; // NOTE: OS_Key and INPUT_Key must be kept in sync!
 		state->frame->key_is_down[event->key] = false;
 
-		Input_Event input_event = {0};
-		input_event.kind = Input_EventKind_Release;
+		INPUT_Event input_event = {0};
+		input_event.kind = INPUT_EventKind_Release;
 		input_event.key = key;
 		DS_ArrPush(&state->events, input_event);
 	}
 	if (event->kind == OS_WINDOW_EventKind_TextCharacter) {
-		Input_Event input_event = {0};
-		input_event.kind = Input_EventKind_TextCharacter;
+		INPUT_Event input_event = {0};
+		input_event.kind = INPUT_EventKind_TextCharacter;
 		input_event.text_character = event->text_character;
 		DS_ArrPush(&state->events, input_event);
 	}

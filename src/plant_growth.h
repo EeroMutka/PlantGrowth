@@ -1,8 +1,4 @@
 
-// -- Constants ---------------------------------------------------------------
-#define SHADOW_VOLUME_SIZE 64
-// ----------------------------------------------------------------------------
-
 struct Bud;
 
 struct ShadowMapPoint {
@@ -49,17 +45,23 @@ struct Plant {
 	uint32_t next_bud_id;
 	int age;
 	float shadow_volume_half_extent;
-	uint8_t shadow_volume[SHADOW_VOLUME_SIZE*SHADOW_VOLUME_SIZE*SHADOW_VOLUME_SIZE]; // each voxel stores the number of buds inside it
+	uint8_t* shadow_volume;
 };
 
 struct PlantParameters {
-	int _;
+	uint32_t random_seed = 1;
+
+	float max_age = 500.f;
+	float vigor_scale = 0.05f;//0.005f;
 };
 
 // ----------------------------------------------------------------------------
 
 void PlantInit(Plant* plant, DS_Arena* arena);
 
+void PlantReset(Plant* plant);
+
+// Returns true if modifications were made
 bool PlantDoGrowthIteration(Plant* plant, DS_Arena* temp, const PlantParameters* params);
 
 float GetLightnessAtPoint(Plant* plant, HMM_Vec3 p);

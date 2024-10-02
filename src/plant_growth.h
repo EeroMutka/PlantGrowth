@@ -10,7 +10,7 @@ struct StemSegment {
 	HMM_Quat end_rotation;
 
 	float width;
-	float end_total_lightness;
+	//float end_total_lightness;
 	float step_scale;
 
 	// for now, let's say that each segment (except the last one) ALWAYS has a lateral bud at the end.
@@ -23,6 +23,8 @@ struct Bud { // a bud can have grown into a branch, but we still call it a bud
 
 	HMM_Vec3 base_point;
 	HMM_Quat base_rotation;
+
+	float distance_from_root;
 
 	ShadowMapPoint end_sample_point;
 
@@ -51,8 +53,14 @@ struct Plant {
 struct PlantParameters {
 	uint32_t random_seed = 1;
 
-	float max_age = 500.f;
+	float max_age = 1000.f;
 	float vigor_scale = 0.05f;//0.005f;
+
+	// can we maybe have a curve graph of apical control over maturity?
+	//float apical_control = 1.f;
+	//int apical_control_maturity;
+
+	int final_apical_control;
 };
 
 // ----------------------------------------------------------------------------

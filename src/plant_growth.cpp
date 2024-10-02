@@ -160,8 +160,9 @@ static void ApicalGrowth(Plant* plant, Bud* bud, float vigor) {
 					new_bud_rot = HMM_QFromAxisAngle_RH({0.f, 0.f, 1.f}, HMM_AngleRad(bud->next_bud_angle_rad)) * new_bud_rot;
 					new_bud_rot = last_segment->end_rotation * new_bud_rot;
 					bud->next_bud_angle_rad += golden_ratio_rad_increment;
-			
+
 					Bud* new_bud = DS_New(Bud, plant->arena);
+					new_bud->distance_from_root = bud->distance_from_root + (float)bud->segments.count;
 					new_bud->id = plant->next_bud_id++;
 					new_bud->base_point = last_segment->end_point;
 					new_bud->base_rotation = new_bud_rot;
@@ -203,7 +204,7 @@ static void BudGrow(Plant* plant, DS_Arena* temp, Bud* bud, float vigor, const P
 	
 	// shed the branch?
 	if (bud->segments.count > 0) {
-		//float branch_lightness = bud->segments.data[0].end_lightness_main + bud->segments.data[0].end_lightness_lateral;
+		//float branch_lightness = bud->segments[0].end_lightness_main + bud->segments[0].end_lightness_lateral;
 		//if ((float)bud->segments.count * 0.7 > branch_lightness) {
 		//	bud->is_dead = true;
 		//	DS_ArrClear(&bud->segments);
@@ -235,9 +236,69 @@ static void BudGrow(Plant* plant, DS_Arena* temp, Bud* bud, float vigor, const P
 		// we want apical control to be a ratio.
 		// 0 means all resources are given equally to all lateral buds, and nothing is given to the apical bud.
 		// 1 means all resources are given equally to all buds, including apical bud.
-		float apical_control = 1.f;
 
-		int first_possible_active_bud = 3;
+		float apical_control = 1.f;
+		//if (bud->segments.count > 5)  apical_control = 0.5f;
+		
+		
+		// so we need apical control curves... how should they work?
+		// Let's try to tie apical control directly to f1(distance_from_root) + f2(segments_count)    we might want to decrease apical control
+		
+		// so we might want to have a drop...
+
+		
+		// what if we have "apical control over bud distance?"
+
+		float stem_length = (float)bud->segments.count;
+		//float bud_dist = bud->distance_from_root + stem_length; // this could be also made more accurate with half-segments at the end
+		float base_dist = bud->distance_from_root; // this could be also made more accurate with half-segments at the end
+		
+		// We could blend between "apical_control_over_dist" and "apical_control_over_stem_length" with a lerp.
+		// Or we could add some value to "bud_dist".
+
+		// We can have two weights here, or even three!
+		// apical control over "time"
+		if (base_dist*0.f + stem_length*1.f + (float)bud->order*0.f > 30.f) {
+			apical_control = 0.1f;
+		}
+
+		/*if (bud->distance_from_root > 30.f) {
+			if (bud->segments.count > 5) {
+				apical_control = 0.3f;
+			}
+			//apical_control = 0.5f;
+		}
+		else {
+			if (bud->segments.count > 40) apical_control = 0.f;
+		}*/
+		
+		int first_possible_active_bud = 5;
+
+		// how can we get the "order" as a float?
+		// smooth_order? if something splits from the base, then it's the same as the parent thing. If something splits from the end, then it's very different.
+		// so maybe it's like the "base distance?"
+		
+		// 
+		//if (leafness > 0.7f) {
+		//	if (bud->segments.count > 5) apical_control = 0.1f;
+		//}
+		//else {
+		//}
+		
+		// apical control over leafness curve...
+		// apical control threshold speedup over leafness
+
+		//float maturity_ratio = bud->segments[0].width / plant->root.segments[0].width;
+
+		// how to parametrize this neatly?
+		// Instead of talking about order, should we talk about the maturity of the bud?
+		// how mature is this bud?
+
+		// so we want the following behaviour:
+		// high apical control in the beginning, then when reaching a point of maturity, enable it more again.
+		// we can use bud->segments.count to approximate the maturity of the bud.
+
+		/*
 		if (bud->order == 0) {
 			if (bud->segments.count > 20) {
 				apical_control = 0.f;
@@ -259,13 +320,13 @@ static void BudGrow(Plant* plant, DS_Arena* temp, Bud* bud, float vigor, const P
 			apical_control = 1.f;
 			//first_possible_active_bud = 0;
 			threshold = 1.f;
-		}
+		}*/
 
 		float vigor_after_leaf_growth = vigor;
 
 		// leaf growth
 		for (int i = 0; i < bud->segments.count - 1; i++) { // NOTE: the last segment may not ever have an active lateral bud!
-			StemSegment* segment = &bud->segments.data[i];
+			StemSegment* segment = &bud->segments[i];
 			Bud* end_lateral = segment->end_lateral;
 			bool in_leaf_stage = end_lateral->segments.count == 0;
 			
@@ -282,32 +343,18 @@ static void BudGrow(Plant* plant, DS_Arena* temp, Bud* bud, float vigor, const P
 		}
 
 		for (int i = first_possible_active_bud; i < bud->segments.count - 1; i++) { // NOTE: the last segment may not ever have an active lateral bud!
-			StemSegment* segment = &bud->segments.data[i];
+			StemSegment* segment = &bud->segments[i];
 			Bud* end_lateral = segment->end_lateral;
 			//if (segment.end_total_lightness + segment.end_lateral->total_lightness == 0.f) break;
 			HMM_Vec3 lateral_dir = HMM_RotateV3({0, 0, 1}, end_lateral->base_rotation); // @speed
 
-			// The problem now is that if we have a trunk with equal light in each segment,
-			// it's impossible to "pick" only a few buds to start growing with just a threshold.
-			// I think, per bud, we should assign a random number like "bud quality". Still, then there will be a difference between lateral branches and branches going upwards.
-
-			// for now, ignore the lightness and just say it's totally random.
-
 			float bud_random_strength_bias = RandomFloat(params->random_seed + end_lateral->id, 0.f, 1.f);
 
 			// is this an active bud?
-			if (/*end_lateral->max_lightness + */bud_random_strength_bias > threshold &&
+			if (bud_random_strength_bias > threshold &&
 				HMM_DotV3(lateral_dir, prev_active_bud_direction) < 0.f)
 			{
 				DS_ArrPush(&active_buds, end_lateral);
-				//float v_main_weight = apical_control * segment.end_total_lightness;
-				//float v_lateral_weight = (1.f - apical_control) * end_lateral->total_lightness;
-				//float mult = vigor_left / (v_main_weight + v_lateral_weight);
-				//float v_lateral = v_lateral_weight * mult;
-				//vigor_left = v_main_weight * mult;
-
-				//vigor_left += BudGrow(plant, end_lateral, v_lateral, temp_arena);
-				
 				prev_active_bud_direction = lateral_dir;
 			}
 		}
@@ -317,7 +364,7 @@ static void BudGrow(Plant* plant, DS_Arena* temp, Bud* bud, float vigor, const P
 			
 		// how much vigor to give to lateral buds?
 		for (int i = 0; i < active_buds.count; i++) {
-			Bud* lateral_bud = active_buds.data[i];
+			Bud* lateral_bud = active_buds[i];
 			BudGrow(plant, temp, lateral_bud, v_lateral, params);
 		}
 
@@ -325,58 +372,23 @@ static void BudGrow(Plant* plant, DS_Arena* temp, Bud* bud, float vigor, const P
 	}
 }
 
-// returns the total length of all segments combined
-static float PlantCalculateLight(Plant* plant, Bud* bud, float* out_width) {
+static float CalculateTotalLengthAndApplySegmentWidth(Plant* plant, Bud* bud) {
 	ShadowMapPoint shadow_p = bud->end_sample_point;
 	uint8_t val = plant->shadow_volume[shadow_p.z*SHADOW_VOLUME_SIZE*SHADOW_VOLUME_SIZE + shadow_p.y*SHADOW_VOLUME_SIZE + shadow_p.x];
-	
-	float total_lightness = 1.f - ((float)val-1.f)/255.f;
-	total_lightness = HMM_MAX(total_lightness, 0.f);
-	
-	float max_lightness = total_lightness;
-
-	//const float bud_width = 0.002f;
-	//const float bud_width = 0.00025f;
-	//float width = bud_width;
 
 	float total_length = 0.f;
-	//float max_total_length = 0.f;
-	//float width_linear = 0.0f;
 	float width = 0.f;
 
 	for (int i = bud->segments.count - 1; i >= 0; i--) {
-		StemSegment* segment = &bud->segments.data[i];
-		segment->end_total_lightness = total_lightness;
-
+		StemSegment* segment = &bud->segments[i];
 		if (segment->end_lateral) {
-			float lateral_width = 0.f;
-			total_length += PlantCalculateLight(plant, segment->end_lateral, &lateral_width);
-			//width_linear += lateral_width;
-			//width_linear = HMM_MAX(width, width_linear); // we need to accomodate the lateral
-			
-			//width = total_length;
-
-			//float lateral_width = segment->end_lateral->segments.count > 0 ? segment->end_lateral->segments.data[0].width : bud_width;
-			//assert(lateral_width >= bud_width);
-			//width = sqrtf(width*width + lateral_width*lateral_width);
-			//width += lateral_width*1.f;
-			
-			max_lightness = HMM_MAX(max_lightness, segment->end_lateral->max_lightness);
-			total_lightness += segment->end_lateral->total_lightness;
+			total_length += CalculateTotalLengthAndApplySegmentWidth(plant, segment->end_lateral);
 		}
 
-		// width grows over time as well...
-		//width_linear += 0.0002f*segment->step_scale;
-		//width = 0.1f*sqrtf(width_linear);//Decelerate(width_linear, 50.f);
-		//segment->width = sqrtf(Decelerate(total_length, 0.0002f)) * 0.0003f + 0.0001f;
 		segment->width = sqrtf(total_length) * 0.0003f + 0.0001f;
-		
 		total_length += segment->step_scale;
 	}
 	
-	//*out_width = width_linear;
-	bud->total_lightness = total_lightness;
-	bud->max_lightness = max_lightness;
 	return total_length;
 }
 
@@ -391,11 +403,10 @@ void PlantInit(Plant* plant, DS_Arena* arena) {
 }
 
 bool PlantDoGrowthIteration(Plant* plant, DS_Arena* temp, const PlantParameters* params) {
-	float _width;
-	float total_length = 10.f + PlantCalculateLight(plant, &plant->root, &_width);
-	if (total_length > params->max_age) return false;
+	float age = 10.f + CalculateTotalLengthAndApplySegmentWidth(plant, &plant->root);
+	if (age > params->max_age) return false;
 
- 	BudGrow(plant, temp, &plant->root, params->vigor_scale * total_length, params);
+ 	BudGrow(plant, temp, &plant->root, params->vigor_scale * age, params);
 	plant->age++;
 
 	return true;

@@ -500,7 +500,7 @@ static inline void* DS_CloneSizeA(DS_Arena* arena, const void* value, int size, 
 #ifdef __cplusplus
 template<class T> struct DS_DynArray_ {
 	DS_Allocator* allocator; T* data; int32_t count; int32_t capacity;
-	inline T& operator [](int i) { return (DS_ArrBoundsCheck((*this), i), data[i]); }
+	inline T& operator [](size_t i) { return (DS_ArrBoundsCheck((*this), i), data[i]); }
 };
 #define DS_DynArray(T) DS_DynArray_<T>
 typedef struct { DS_Allocator* allocator; void* data; int32_t count; int32_t capacity; } DS_DynArrayRaw;

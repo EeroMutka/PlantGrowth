@@ -139,16 +139,16 @@ static STR_View ReadEntireFile(DS_Arena* arena, const char* file) {
 
 //static void DebugDrawPlant(const GizmosViewport* vp, Plant* plant) {
 //	for (int i = 0; i < plant->all_buds.count; i++) {
-//		Bud* bud = plant->all_buds.data[i];
+//		Bud* bud = plant->all_buds[i];
 //
 //		HMM_Vec3 prev_p = bud->base_point;
 //		for (int j = 0; j < bud->segments.count; j++) {
-//			StemSegment* segment = &bud->segments.data[j];
+//			StemSegment* segment = &bud->segments[j];
 //			DrawLine3D(vp, prev_p, segment->end_point, 5.f, UI_BLUE);
 //			prev_p = segment->end_point;
 //
 //			//if (j > 0) {
-//			//	StemPoint* prev_bud_point = &bud->points.data[j - 1];
+//			//	StemPoint* prev_bud_point = &bud->points[j - 1];
 //			//}
 //			//DrawPoint3D(vp, bud_point->point, bud_point->thickness * 100.f, UI_BLUE);
 //		}
@@ -224,12 +224,12 @@ static ImportedMesh ImportMesh(DS_Arena* arena, const char* filepath) {
 		void* primitive_indices = (char*)indices->buffer_view->buffer->data + indices->buffer_view->offset;
 		if (indices->component_type == cgltf_component_type_r_16u) {
 			for (cgltf_size i = 0; i < indices->count; i++) {
-				result.indices.data[i] = ((uint16_t*)primitive_indices)[i];
+				result.indices[i] = ((uint16_t*)primitive_indices)[i];
 			}
 		}
 		else if (indices->component_type == cgltf_component_type_r_32u) {
 			for (cgltf_size i = 0; i < indices->count; i++) {
-				result.indices.data[i] = ((uint32_t*)primitive_indices)[i];
+				result.indices[i] = ((uint32_t*)primitive_indices)[i];
 			}
 		}
 		else assert(0);
@@ -268,12 +268,12 @@ static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* 
 	
 	uint32_t first_vertex = (uint32_t)vertices->count;
 	for (int i = 0; i < base_morph.vertices.count; i++) {
-		SimpleGPUMeshVertex vert = base_morph.vertices.data[i];
+		SimpleGPUMeshVertex vert = base_morph.vertices[i];
 		
 		if (morph_amount > 0.f) {
 			assert(imported_mesh->vertices_morphs.count > 1);
 			ImportedMeshMorphTarget second_morph = DS_ArrGet(imported_mesh->vertices_morphs, 1);
-			SimpleGPUMeshVertex second_vert = second_morph.vertices.data[i];
+			SimpleGPUMeshVertex second_vert = second_morph.vertices[i];
 		
 			vert.position += morph_amount * second_vert.position;
 			vert.normal += morph_amount * second_vert.normal;
@@ -287,7 +287,7 @@ static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* 
 	}
 
 	for (int i = 0; i < imported_mesh->indices.count; i++) {
-		uint32_t src_idx = imported_mesh->indices.data[i];
+		uint32_t src_idx = imported_mesh->indices[i];
 		DS_ArrPush(indices, src_idx + first_vertex);
 	}
 }
@@ -318,10 +318,10 @@ static void RegeneratePlantMeshStep(Plant* plant, MeshVertexList* vertices, Mesh
 			HMM_Vec3 base_point;
 			StemSegment* segment;
 			if (j == -1) {
-				segment = &bud->segments.data[0];
+				segment = &bud->segments[0];
 				base_point = bud->base_point;
 			} else {
-				segment = &bud->segments.data[j];
+				segment = &bud->segments[j];
 				if (segment->end_lateral) {
 					RegeneratePlantMeshStep(plant, vertices, indices, segment->end_lateral);
 				}
@@ -375,6 +375,39 @@ static void RegeneratePlantMesh() {
 	g_has_plant_mesh = true;
 }
 
+
+// -- Curves ---------------------------------------------------------------
+
+struct UI_Curve {
+	DS_DynArray(UI_Vec2) points; // for now, just support linear interpolation
+};
+
+static void UI_CurveInit(UI_Curve* curve, DS_Allocator* allocator) {
+	DS_ArrInit(&curve->points, allocator);
+}
+
+static void UI_CurveDeinit(UI_Curve* curve) {
+	DS_ArrDeinit(&curve->points);
+}
+
+static void UI_ValCurveDraw(UI_Box* box) {
+	UI_DrawRect(box->computed_rect, UI_PINK);
+}
+
+// IDEA: The curve UI could be used for arbitrary plotting and for example outputting profiling data!
+// And an animation curves editor.
+
+static void UI_AddValCurve(UI_Key key, UI_Curve* curve, UI_Size w, UI_Size h) {
+	UI_Box* box = UI_AddBox(key, w, h, UI_BoxFlag_DrawBorder);
+	box->draw = UI_ValCurveDraw;
+
+	// hmm... the curve pointer must stay valid for the entire frame.
+	// That sucks.
+	// I think the "fire-UI" way to deal with this is to use the prev frame rect for curve editing inputs.
+}
+
+// -------------------------------------------------------------------------
+
 static void UpdateAndRender() {
 	Camera_Update(&g_camera, &g_inputs, 0.002f, 0.001f, 70.f, g_window_size.x / g_window_size.y, 0.01f, 1000.f);
 
@@ -395,12 +428,25 @@ static void UpdateAndRender() {
 
 	PlantParameters plant_params_old;
 	memcpy(&plant_params_old, &g_plant_params, sizeof(PlantParameters)); // use memcpy to copy any compiler-introduced padding bytes as well
+		
+	static UI_Curve curve;
+	{
+		static bool first_frame = true;
+		if (first_frame) {
+			UI_CurveInit(&curve, DS_HEAP);
+			first_frame = false;
+		}
+	}
 
 	static bool wireframe = false;
 	UI_AddFmt(UI_KEY(), "Wireframe: %!b", &wireframe);
 	UI_AddFmt(UI_KEY(), "Seed: %!u", &g_plant_params.random_seed);
 	UI_AddFmt(UI_KEY(), "Max age: %!f", &g_plant_params.max_age);
 	UI_AddFmt(UI_KEY(), "Vigor scale: %!f", &g_plant_params.vigor_scale);
+	
+	UI_AddFmt(UI_KEY(), "-- Apical growth curve --");
+	UI_AddValCurve(UI_KEY(), &curve, UI_SizeFlex(1.f), 80.f);
+	UI_AddFmt(UI_KEY(), "-------------------------");
 
 	/*
 	UI_AddFmt(UI_KEY(), "Age: %!f", &g_plant_params.age);

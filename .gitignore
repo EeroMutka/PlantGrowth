@@ -2,3 +2,5 @@
 **/build/*
 !**/build/*.sln
 !**/build/*.vcxproj
+*.obj
+*.exe

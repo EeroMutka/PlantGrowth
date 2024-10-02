@@ -1,6 +1,7 @@
-// fire_os_window.h - OS window creation and input library (currently only implemented on windows)
-// Written by Eero Mutka.
+// fire_os_window.h - by Eero Mutka (https://eeromutka.github.io/)
 //
+// OS window creation and keyboard/mouse input. Only Windows is supported for time being.
+// 
 // This code is released under the MIT license (https://opensource.org/licenses/MIT).
 //
 // If you wish to use a different prefix than OS_WINDOW_, simply do a find and replace in this file.
@@ -243,7 +244,7 @@ OS_WINDOW_API void OS_WINDOW_SetMouseCursorLockAndHide(OS_WINDOW* window, bool l
 
 #pragma comment(lib, "User32.lib")
 
-#include <Windows.h> // TODO: get rid of this include and forward-declare manually
+#include <Windows.h>
 
 OS_WINDOW_API OS_WINDOW OS_WINDOW_Create(uint32_t width, uint32_t height, const char* name) {
 	OS_WINDOW window = OS_WINDOW_CreateHidden(width, height, name);

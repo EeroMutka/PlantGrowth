@@ -50,7 +50,7 @@ static void UI_Input_ApplyInputs(UI_Inputs* ui_inputs, Input_Frame* inputs) {
 			}
 		}
 		if (event->kind == Input_EventKind_TextCharacter) {
-			if (ui_inputs->text_input_utf32_length < UI_ArrayCount(ui_inputs->text_input_utf32)) {
+			if (ui_inputs->text_input_utf32_length < DS_ArrayCount(ui_inputs->text_input_utf32)) {
 				ui_inputs->text_input_utf32[ui_inputs->text_input_utf32_length] = event->text_character;
 				ui_inputs->text_input_utf32_length++;
 			}

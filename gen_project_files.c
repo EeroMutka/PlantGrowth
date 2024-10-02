@@ -2,7 +2,6 @@
 #define ArrCount(x) sizeof(x) / sizeof(x[0])
 
 int main() {
-	
 	BUILD_ProjectOptions opts = {
 		.debug_info = true,
 		.c_runtime_library_dll = true, // glslang.lib uses /MD
@@ -13,6 +12,7 @@ int main() {
 	BUILD_InitProject(&plant_growth, "plant_growth", &opts);
 	BUILD_AddIncludeDir(&plant_growth, ".."); // Repository root folder
 	BUILD_AddSourceFile(&plant_growth, "../src/main.cpp");
+	BUILD_AddSourceFile(&plant_growth, "../src/plant_growth.cpp");
 	
 	BUILD_Project* projects[] = {&plant_growth};
 	BUILD_CreateDirectory("build");

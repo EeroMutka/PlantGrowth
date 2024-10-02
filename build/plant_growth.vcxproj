@@ -7,7 +7,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{A3820BEC-322D-4ACD-ACCB-3BCAED9B4096}</ProjectGuid>
+    <ProjectGuid>{3A4AEB51-34ED-4A56-9D05-69BC5CAEEC38}</ProjectGuid>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Custom|x64'" Label="Configuration">
@@ -52,6 +52,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="../src/main.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="../src/plant_growth.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

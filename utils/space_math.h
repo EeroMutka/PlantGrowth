@@ -98,7 +98,7 @@ static float HMM_DistanceToPolygon2D(HMM_Vec2 p, const HMM_Vec2* v, int v_count)
 		HMM_Vec2 e = v[j] - v[i];
 		HMM_Vec2 w = p - v[i];
 		HMM_Vec2 b = HMM_SubV2(w, HMM_MulV2F(e, HMM_Clamp(HMM_DotV2(w,e) / HMM_DotV2(e,e), 0.f, 1.f)));
-		d = min(d, HMM_DotV2(b, b));
+		d = HMM_MIN(d, HMM_DotV2(b, b));
 		
 		bool cx = p.Y >= v[i].Y;
 		bool cy = p.Y < v[j].Y;

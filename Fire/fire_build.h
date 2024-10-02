@@ -1,16 +1,11 @@
-// fire_build.h - build C/C++ projects from code
+// fire_build.h - by Eero Mutka (https://eeromutka.github.io/)
 //
-// Author: Eero Mutka
-// Version: 0
-// Date: 25 March, 2024
-//
-// This code is released under the MIT license (https://opensource.org/licenses/MIT). Some code in this file
-// are also adapted from "microsoft_craziness.h" by Jonathan Blow, which is released under the MIT license.
-//
-// fire_build is a library that lets you build C/C++ code or generate Visual Studio projects from code.
-// The idea is, you make one build.c file, use this library in it, then compile and run it to build your code.
-// Or, do it from anywhere you'd like from your programs as the control is in your hands now!
-//
+// This library lets you build C/C++ code or generate Visual Studio projects directly from code.
+// Only Windows and MSVC are supported targets for time being.
+// 
+// This code is released under the MIT license (https://opensource.org/licenses/MIT). A part of the code
+// in this file is ported over from "microsoft_craziness.h" by Jonathan Blow, which is also released under the MIT license.
+// 
 
 #ifndef BUILD_INCLUDED
 #define BUILD_INCLUDED
@@ -356,7 +351,7 @@ static wchar_t* BUILD_WStrJoin4(BUILD_Arena* arena, const wchar_t* a, const wcha
 	return result;
 }
 
-// From "microsoft_craziness.h"
+// From "microsoft_craziness.h"   -- TODO: Instead of using microsoft_craziness.h functionality, we should use vswhere.exe (https://github.com/Microsoft/vswhere/wiki/Installing)
 typedef void (*BUILD_FindVSVisitProc)(wchar_t* short_name, wchar_t* full_name, BUILD_FindVSVersionData* data);
 static bool BUILD_FindVSVisitFiles(BUILD_Arena* arena, wchar_t* dir_name, BUILD_FindVSVersionData* data, BUILD_FindVSVisitProc proc) {
 	// Visit everything in one folder (non-recursively). If it's a directory
@@ -971,7 +966,7 @@ static bool BUILD_GenerateVisualStudioProject(BUILD_Arena* arena, const BUILD_Pr
 
 	for (int i = 0; i < project->natvis_files.length; i++) {
 		BUILD_Print1(&s, "<ItemGroup>\n");
-		BUILD_Print3(&s, "  <Natvis Include=\"", project->natvis_files.data[i], "\" />\n");
+		BUILD_Print3(&s, "  <None Include=\"", project->natvis_files.data[i], "\" />\n");
 		BUILD_Print1(&s, "</ItemGroup>\n");
 	}
 	

@@ -1,10 +1,7 @@
 // Basic high-level 3D renderer that is supposed to be fun and easy to use for prototyping.
 // Not necessarily the most performant or flexible. Currently only targets D3D11.
 // 
-// For the feature set, I'm thinking an uber shader that can do most of what, say, blender EEVEE can do. But rendering
-// basic meshes should still be super easy.
-// 
-// Depends on `fire.h`, `HandmadeMath.h` and D3D11
+// Depends on `HandmadeMath.h` and D3D11
 // 
 
 #include <stdint.h>

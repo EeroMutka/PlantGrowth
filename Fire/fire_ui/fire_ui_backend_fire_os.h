@@ -1,24 +1,21 @@
-// This file is part of the Fire UI library, see "fire_ui.h"
 
 static void* UI_OS_GetClipboardAlloc(int size, void* alloc_data) {
 	return DS_ArenaPush(UI_FrameArena(), size);
 }
 
-static STR UI_OS_GetClipboardString(void* user_data) {
+static STR_View UI_OS_GetClipboardString(void* user_data) {
 	char* data; int size;
 	OS_CLIPBOARD_GetText(&data, &size, UI_OS_GetClipboardAlloc, NULL);
-	STR string = {data, size};
+	STR_View string = {data, size};
 	return string;
 }
 
-static void UI_OS_SetClipboardText(STR string, void* user_data) {
+static void UI_OS_SetClipboardText(STR_View string, void* user_data) {
 	OS_CLIPBOARD_SetText(string.data, string.size);
 }
 
-static void UI_OS_ResetFrameInputs(OS_WINDOW* window, UI_Inputs* ui_inputs, UI_Font* base_font, UI_Font* icons_font) {
+static void UI_OS_ResetFrameInputs(OS_WINDOW* window, UI_Inputs* ui_inputs) {
 	memset(ui_inputs, 0, sizeof(*ui_inputs));
-	ui_inputs->base_font = base_font;
-	ui_inputs->icons_font = icons_font;
 	ui_inputs->get_clipboard_string_fn = UI_OS_GetClipboardString;
 	ui_inputs->set_clipboard_string_fn = UI_OS_SetClipboardText;
 	
@@ -78,21 +75,20 @@ static void UI_OS_RegisterInputEvent(UI_Inputs* ui_inputs, const OS_WINDOW_Event
 		ui_inputs->mouse_raw_delta.y += event->raw_mouse_input[1];
 	}
 	if (event->kind == OS_WINDOW_EventKind_TextCharacter) {
-		if (ui_inputs->text_input_utf32_length < UI_ArrayCount(ui_inputs->text_input_utf32)) {
+		if (ui_inputs->text_input_utf32_length < DS_ArrayCount(ui_inputs->text_input_utf32)) {
 			ui_inputs->text_input_utf32[ui_inputs->text_input_utf32_length] = event->text_character;
 			ui_inputs->text_input_utf32_length++;
 		}
 	}
 }
 
-static void UI_OS_ApplyMouseControl(OS_WINDOW* window, UI_MouseCursor cursor) {
-	OS_WINDOW_SetMouseCursorLockAndHide(window, cursor == UI_MouseCursor_LockAndHide);
+static void UI_OS_ApplyOutputs(OS_WINDOW* window, const UI_Outputs* outputs) {
+	OS_WINDOW_SetMouseCursorLockAndHide(window, outputs->lock_and_hide_cursor);
 
-	switch (cursor) {
+	switch (outputs->cursor) {
 	case UI_MouseCursor_Default: OS_WINDOW_SetMouseCursor(window, OS_WINDOW_MouseCursor_Arrow); break;
 	case UI_MouseCursor_ResizeH: OS_WINDOW_SetMouseCursor(window, OS_WINDOW_MouseCursor_ResizeH); break;
 	case UI_MouseCursor_ResizeV: OS_WINDOW_SetMouseCursor(window, OS_WINDOW_MouseCursor_ResizeV); break;
 	case UI_MouseCursor_I_beam:  OS_WINDOW_SetMouseCursor(window, OS_WINDOW_MouseCursor_I_Beam); break;
-	case UI_MouseCursor_LockAndHide: break;
 	}
 }

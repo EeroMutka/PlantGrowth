@@ -57,7 +57,7 @@
 #define CAMERA_VIEW_SPACE_IS_POSITIVE_Y_DOWN
 #include "utils/camera.h"
 
-#include "growth.h"
+#include "plant_growth.h"
 
 struct SimpleGPUMeshVertex {
 	HMM_Vec3 position;
@@ -95,7 +95,7 @@ static ID3D11RenderTargetView* g_dx11_framebuffer_view;
 static ID3D11Texture2D* g_dx11_depthbuffer;
 static ID3D11DepthStencilView* g_dx11_depthbuffer_view;
 
-static UI_Font g_base_font, g_icons_font;
+static UI_FontIndex g_base_font, g_icons_font;
 
 static Input_Frame g_inputs;
 static DS_Arena g_persist;
@@ -119,11 +119,11 @@ static ImportedMesh g_imported_mesh_bud;
 static ImportedMesh g_imported_mesh_leaf;
 
 static B3R_Texture g_texture_skybox;
-static B3R_Mesh g_mesh_skybox;
+//static B3R_Mesh g_mesh_skybox;
 
 ////////////////////////////////////////////////////////////
 
-static STR ReadEntireFile(DS_Arena* arena, const char* file) {
+static STR_View ReadEntireFile(DS_Arena* arena, const char* file) {
 	FILE* f = fopen(file, "rb");
 	assert(f);
 
@@ -135,17 +135,16 @@ static STR ReadEntireFile(DS_Arena* arena, const char* file) {
 	fread(data, fsize, 1, f);
 
 	fclose(f);
-	STR result = {data, fsize};
+	STR_View result = {data, fsize};
 	return result;
-
 }
 
 //static void DebugDrawPlant(const GizmosViewport* vp, Plant* plant) {
-//	for (int i = 0; i < plant->all_buds.length; i++) {
+//	for (int i = 0; i < plant->all_buds.count; i++) {
 //		Bud* bud = plant->all_buds.data[i];
 //
 //		HMM_Vec3 prev_p = bud->base_point;
-//		for (int j = 0; j < bud->segments.length; j++) {
+//		for (int j = 0; j < bud->segments.count; j++) {
 //			StemSegment* segment = &bud->segments.data[j];
 //			DrawLine3D(vp, prev_p, segment->end_point, 5.f, UI_BLUE);
 //			prev_p = segment->end_point;
@@ -253,91 +252,8 @@ static ImportedMesh ImportMesh(DS_Arena* arena, const char* filepath) {
 static void MeshInitFromFile(B3R_Mesh* result, const char* filepath) {
 	ImportedMesh mesh = ImportMesh(&g_temp, filepath);
 	ImportedMeshMorphTarget main_morph = DS_ArrGet(mesh.vertices_morphs, 0);
-	B3R_MeshInit(result, B3R_VertexLayout_PosNorUVCol, main_morph.vertices.data, main_morph.vertices.length, mesh.indices.data, mesh.indices.length);
-
-	/*cgltf_options options{};
-	cgltf_data* data = NULL;
-
-	bool ok = true;
-	ok = cgltf_parse_file(&options, filepath, &data) == cgltf_result_success;
-	ok = ok && cgltf_load_buffers(&options, data, filepath) == cgltf_result_success;
-	ok = ok && cgltf_validate(data) == cgltf_result_success;
-	ok = ok && data->meshes_count == 1 && data->meshes[0].primitives_count == 1;
-
-	if (ok) {
-		cgltf_mesh* mesh = &data->meshes[0];
-		cgltf_primitive* primitive = &mesh->primitives[0];
-
-		DS_DynArray(uint32_t) dst_indices = {&g_temp};
-		DS_DynArray(SimpleGPUMeshVertex) dst_vertices = {&g_temp};
-
-		cgltf_accessor* indices = primitive->indices;
-		DS_ArrResizeUndef(&dst_indices, (int)indices->count);
-
-		void* primitive_indices = (char*)indices->buffer_view->buffer->data + indices->buffer_view->offset;
-		if (indices->component_type == cgltf_component_type_r_16u) {
-			for (cgltf_size i = 0; i < indices->count; i++) {
-				dst_indices.data[i] = ((uint16_t*)primitive_indices)[i];
-			}
-		}
-		else if (indices->component_type == cgltf_component_type_r_32u) {
-			for (cgltf_size i = 0; i < indices->count; i++) {
-				dst_indices.data[i] = ((uint32_t*)primitive_indices)[i];
-			}
-		}
-		else assert(0);
-
-		HMM_Vec3* positions_data = NULL;
-		HMM_Vec3* normals_data = NULL;
-		HMM_Vec2* texcoords_data = NULL;
-
-		uint32_t num_vertices = (uint32_t)primitive->attributes[0].data->count;
-		DS_ArrResizeUndef(&dst_vertices, num_vertices);
-
-		for (int i = 0; i < primitive->attributes_count; i++) {
-			cgltf_attribute* attribute = &primitive->attributes[i];
-			void* attribute_data = (char*)attribute->data->buffer_view->buffer->data + attribute->data->buffer_view->offset;
-
-			assert(attribute->data->count == num_vertices);
-
-			if (attribute->type == cgltf_attribute_type_position) {
-				positions_data = (HMM_Vec3*)attribute_data;
-			} else if (attribute->type == cgltf_attribute_type_normal) {
-				normals_data = (HMM_Vec3*)attribute_data;
-			} else if (attribute->type == cgltf_attribute_type_texcoord) {
-				texcoords_data = (HMM_Vec2*)attribute_data;
-			}
-		}
-
-		ok = positions_data != NULL && normals_data != NULL && texcoords_data != NULL;
-		if (ok) {
-			for (uint32_t i = 0; i < num_vertices; i++) {
-				HMM_Vec3 position = positions_data[i];
-				HMM_Vec3 normal = normals_data[i];
-				HMM_Vec2 uv = texcoords_data[i];
-
-				// In GLTF, Y is up, but we want Z up.
-				position = {position.X, -1.f * position.Z, position.Y};
-				normal = {normal.X, -1.f * normal.Z, normal.Y};
-
-				SimpleGPUMeshVertex dst_vertex = {
-					position.X, position.Y, position.Z,
-					normal.X, normal.Y, normal.Z,
-					uv.X, uv.Y,
-					255, 255, 255, 255,
-				};
-			
-				dst_vertices.data[i] = dst_vertex;
-			}
-
-			B3R_MeshInit(result, B3R_VertexLayout_PosNorUVCol, dst_vertices.data, dst_vertices.length, dst_indices.data, dst_indices.length);
-		}
-	}
-
-	cgltf_free(data);
-	assert(ok); // just assert for now, but this could be easily turned into a return value*/
+	B3R_MeshInit(result, B3R_VertexLayout_PosNorUVCol, main_morph.vertices.data, main_morph.vertices.count, mesh.indices.data, mesh.indices.count);
 }
-
 
 typedef DS_DynArray(SimpleGPUMeshVertex) MeshVertexList;
 typedef DS_DynArray(uint32_t) MeshIndexList;
@@ -352,12 +268,12 @@ static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* 
 {
 	ImportedMeshMorphTarget base_morph = DS_ArrGet(imported_mesh->vertices_morphs, 0);
 	
-	uint32_t first_vertex = (uint32_t)vertices->length;
-	for (int i = 0; i < base_morph.vertices.length; i++) {
+	uint32_t first_vertex = (uint32_t)vertices->count;
+	for (int i = 0; i < base_morph.vertices.count; i++) {
 		SimpleGPUMeshVertex vert = base_morph.vertices.data[i];
 		
 		if (morph_amount > 0.f) {
-			assert(imported_mesh->vertices_morphs.length > 1);
+			assert(imported_mesh->vertices_morphs.count > 1);
 			ImportedMeshMorphTarget second_morph = DS_ArrGet(imported_mesh->vertices_morphs, 1);
 			SimpleGPUMeshVertex second_vert = second_morph.vertices.data[i];
 		
@@ -369,47 +285,14 @@ static void MeshBuilderAddImportedMesh(MeshVertexList* vertices, MeshIndexList* 
 		vert.position = *position + HMM_MulM3V3(*rot_scale, vert.position);
 		vert.normal = HMM_MulM3V3(*rot_scale, vert.normal);
 		
-		//if (soft_normal) vert.normal = HMM_Lerp(HMM_NormV3(vert.normal), 0.5f, *soft_normal);
-
 		vert.color_rgba = color;
 		DS_ArrPush(vertices, vert);
 	}
 
-	for (int i = 0; i < imported_mesh->indices.length; i++) {
+	for (int i = 0; i < imported_mesh->indices.count; i++) {
 		uint32_t src_idx = imported_mesh->indices.data[i];
 		DS_ArrPush(indices, src_idx + first_vertex);
 	}
-}
-
-static void RegeneratePlantShadowMapMesh(Plant* plant) {
-	MeshVertexList vertices = {&g_temp};
-	MeshIndexList indices = {&g_temp};
-
-	float voxel_size = 1.f / (float)SHADOW_VOLUME_DIM;
-	int i = 0;
-	for (int z = 0; z < SHADOW_VOLUME_DIM; z++) {
-		for (int y = 0; y < SHADOW_VOLUME_DIM; y++) {
-			for (int x = 0; x < SHADOW_VOLUME_DIM; x++) {
-				uint8_t val = plant->shadow_volume[i];
-				if (val > 0) {
-					HMM_Vec3 pos = HMM_Vec3{(float)x + 0.5f, (float)y + 0.5f, (float)z + 0.5f} * voxel_size + HMM_Vec3{-0.5f, -0.5f, 0.f};
-
-					int lightness = (int)val;
-					if (lightness > 255) lightness = 255;
-					
-					uint32_t rgba = (uint32_t)lightness | ((uint32_t)lightness << 8) | ((uint32_t)lightness << 16) | (0xFF << 24);
-					//MeshBuilderAddImportedMesh(&vertices, &indices, &g_imported_mesh_unit_cube, pos, {0, 0, 0, 1}, 0.8f*voxel_size, 0.f, rgba);
-				}
-				i++;
-			}
-		}
-	}
-
-	if (g_has_plant_shadow_map_mesh) {
-		B3R_MeshDeinit(&g_plant_shadow_map_mesh);
-	}
-	B3R_MeshInit(&g_plant_shadow_map_mesh, B3R_VertexLayout_PosNorUVCol, vertices.data, vertices.length, indices.data, indices.length);
-	g_has_plant_shadow_map_mesh = true;
 }
 
 static void RegeneratePlantMeshStep(Plant* plant, MeshVertexList* vertices, MeshIndexList* indices, Bud* bud) {
@@ -422,9 +305,7 @@ static void RegeneratePlantMeshStep(Plant* plant, MeshVertexList* vertices, Mesh
 		// 
 		// We could kill leaves by setting their vertex positions with dead leaves by animating their vertex positions over time to fall on the ground.
 
-		// how can we determine the leaf occlusion?
-		ShadowMapPoint shadow_p = PointToShadowMapSpace(plant, bud->base_point);
-		float lightness = 1.f - (float)plant->shadow_volume[shadow_p.z*SHADOW_VOLUME_DIM*SHADOW_VOLUME_DIM + shadow_p.y*SHADOW_VOLUME_DIM + shadow_p.x] / 255.f;
+		float lightness = GetLightnessAtPoint(plant, bud->base_point);
 		
 		//HMM_Vec3 color = HMM_LerpV3({80, 150, 60}, lightness, {120, 255, 90});
 		HMM_Vec3 color = HMM_LerpV3({40, 100, 30}, lightness, {150, 255, 90});
@@ -435,9 +316,9 @@ static void RegeneratePlantMeshStep(Plant* plant, MeshVertexList* vertices, Mesh
 		MeshBuilderAddImportedMesh(vertices, indices, &g_imported_mesh_leaf, &bud->base_point, &rot_scale, bud->leaf_growth, color_u32);
 	}
 
-	if (bud->segments.length > 0) {
+	if (bud->segments.count > 0) {
 		uint32_t prev_circle_first_vertex = 0;
-		for (int j = -1; j < bud->segments.length; j++) {
+		for (int j = -1; j < bud->segments.count; j++) {
 			HMM_Vec3 base_point;
 			StemSegment* segment;
 			if (j == -1) {
@@ -456,14 +337,12 @@ static void RegeneratePlantMeshStep(Plant* plant, MeshVertexList* vertices, Mesh
 		
 			//float barkness = HMM_Clamp(segment->width / 0.0005f, 0.f, 1.f);
 			//HMM_Vec3 color = HMM_LerpV3({80, 150, 60}, barkness, {100, 80, 40});
-			ShadowMapPoint shadow_p = PointToShadowMapSpace(plant, segment->end_point);
-			float lightness = 1.f - 2.f*(float)plant->shadow_volume[shadow_p.z*SHADOW_VOLUME_DIM*SHADOW_VOLUME_DIM + shadow_p.y*SHADOW_VOLUME_DIM + shadow_p.x] / 255.f;
-			lightness = HMM_MAX(lightness, 0.f);
+			float lightness = GetLightnessAtPoint(plant, segment->end_point);
 
 			HMM_Vec3 color = HMM_LerpV3({95, 95, 75}, lightness, {120, 100, 80});
 			uint32_t color_u32 = (uint32_t)color.R | (uint32_t)color.G << 8 | (uint32_t)color.B << 16 | 0xFF << 24;
 
-			uint32_t first_vertex = (uint32_t)vertices->length;
+			uint32_t first_vertex = (uint32_t)vertices->count;
 			int num_segments = 8;
 			for (int k = 0; k <= num_segments; k++) {
 				float theta = 2.f * HMM_PI32 * (float)k / (float)num_segments;
@@ -497,7 +376,7 @@ static void RegeneratePlantMesh() {
 	if (g_has_plant_mesh) {
 		B3R_MeshDeinit(&g_plant_gpu_mesh);
 	}
-	B3R_MeshInit(&g_plant_gpu_mesh, B3R_VertexLayout_PosNorUVCol, vertices.data, vertices.length, indices.data, indices.length);
+	B3R_MeshInit(&g_plant_gpu_mesh, B3R_VertexLayout_PosNorUVCol, vertices.data, vertices.count, indices.data, indices.count);
 	g_has_plant_mesh = true;
 }
 
@@ -511,14 +390,12 @@ static void UpdateAndRender() {
 
 	UI_Inputs ui_inputs{};
 	UI_Input_ApplyInputs(&ui_inputs, &g_inputs);
-	ui_inputs.base_font = &g_base_font;
-	ui_inputs.icons_font = &g_icons_font;
 	OS_WINDOW_GetMousePosition(&g_window, &ui_inputs.mouse_position.x, &ui_inputs.mouse_position.y);
 
-	UI_DX11_BeginFrame();
-	UI_BeginFrame(&ui_inputs, g_window_size);
+	UI_BeginFrame(&ui_inputs, g_window_size, {g_base_font, 18}, {g_icons_font, 18});
 
-	UI_Box* root = UI_MakeRootBox(UI_KEY(), 330.f, UI_SizeFit(), UI_BoxFlag_DrawOpaqueBackground|UI_BoxFlag_DrawBorder|UI_BoxFlag_ChildPadding);
+	UI_Box* root = UI_MakeRootBox(UI_KEY(), 330.f, UI_SizeFit(), UI_BoxFlag_DrawOpaqueBackground|UI_BoxFlag_DrawBorder);
+	root->inner_padding = {12.f, 12.f};
 	UI_PushBox(root);
 
 	PlantParameters plant_params_old;
@@ -555,15 +432,15 @@ static void UpdateAndRender() {
 	
 	bool pressed_reset = false;
 	if (simulating) {
-		if (UI_Clicked(UI_AddButton(UI_KEY(), UI_SizeFit(), UI_SizeFit(), 0, STR_("PAUSE"))->key)) {
+		if (UI_Clicked(UI_AddButton(UI_KEY(), UI_SizeFit(), UI_SizeFit(), 0, "PAUSE")->key)) {
 			simulating = false;
 		}
 	} else {
-		if (UI_Clicked(UI_AddButton(UI_KEY(), UI_SizeFit(), UI_SizeFit(), 0, STR_("SIMULATE"))->key)) {
+		if (UI_Clicked(UI_AddButton(UI_KEY(), UI_SizeFit(), UI_SizeFit(), 0, "SIMULATE")->key)) {
 			simulating = true;
 		}
 	}
-	if (UI_Clicked(UI_AddButton(UI_KEY(), UI_SizeFit(), UI_SizeFit(), 0, STR_("RESET"))->key)) {
+	if (UI_Clicked(UI_AddButton(UI_KEY(), UI_SizeFit(), UI_SizeFit(), 0, "RESET")->key)) {
 		pressed_reset = true;
 	}
 
@@ -580,14 +457,10 @@ static void UpdateAndRender() {
 		}
 
 		if (simulating) {
-			bool modified = PlantDoGrowthIteration(&g_plant, &g_plant_params, &g_temp);
+			bool modified = PlantDoGrowthIteration(&g_plant, &g_temp, &g_plant_params);
 			if (modified) RegeneratePlantMesh();
 		}
 	}
-
-	//if (Input_WentDownOrRepeat(&g_inputs, Input_Key_Space)) {
-	//	RegeneratePlantShadowMapMesh(&g_plant);
-	//}
 	
 //	bool regen_plant = memcmp(&plant_params_old, &g_plant_params, sizeof(PlantParameters)) != 0 || !g_has_plant_mesh;
 //	if (regen_plant) {
@@ -599,13 +472,10 @@ static void UpdateAndRender() {
 	UI_BoxComputeRects(root, {20.f, 20.f});
 	UI_DrawBox(root);
 
-	//DebugDrawPlant(&vp, &g_plant);
-
 	UI_Outputs ui_outputs;
 	UI_EndFrame(&ui_outputs);
 	
 	FLOAT clearcolor[4] = { 0.5f, 0.5f, 0.5f, 1.f };
-	//FLOAT clearcolor[4] = { 0.9f, 0.9f, 0.9f, 1.f };
 	g_dx11_device_context->ClearRenderTargetView(g_dx11_framebuffer_view, clearcolor);
 	g_dx11_device_context->ClearDepthStencilView(g_dx11_depthbuffer_view, D3D11_CLEAR_DEPTH, 1.0f, 0);
 	
@@ -619,7 +489,7 @@ static void UpdateAndRender() {
 	B3R_BindTexture(NULL);
 	B3R_DrawMesh(&g_plant_gpu_mesh, wireframe ? B3R_DebugMode_Wireframe : B3R_DebugMode_None, NULL, {});
 	
-	// Shadow rendering hack
+	// Shadow rendering trick
 	{
 		HMM_Mat4 shadow_mat = HMM_Scale({1, 1, 0});
 		B3R_BindDirectionalLight(0, {}, 1.f, {1.f, 1.f, 1.f});
@@ -629,18 +499,16 @@ static void UpdateAndRender() {
 
 	B3R_BindDirectionalLight(0, {}, 1.f, {1.f, 1.f, 1.f});
 	B3R_BindDirectionalLight(1, {}, 0.f, {0.f, 0.f, 0.f});
-	//B3R_BindTexture(&g_texture_skybox);
-	//B3R_DrawMesh(&g_mesh_skybox, B3R_DebugMode_None);
 	
 	if (visualize_shadow_map) {
 		B3R_DrawMesh(&g_plant_shadow_map_mesh, B3R_DebugMode_None, NULL, {});
 	}
 
 	B3R_EndDrawing();
-	// --------------------------------------------
 
-	UI_DX11_EndFrame(&ui_outputs, g_dx11_framebuffer_view);
-	UI_OS_ApplyMouseControl(&g_window, ui_outputs.cursor);
+	UI_DX11_Draw(&ui_outputs, g_dx11_framebuffer_view);
+	
+	UI_OS_ApplyOutputs(&g_window, &ui_outputs);
 	
 	g_dx11_swapchain->Present(1, 0);
 }
@@ -689,7 +557,7 @@ static void InitApp() {
 	DS_ArenaInit(&g_persist, 4096, DS_HEAP);
 	DS_ArenaInit(&g_temp, 4096, DS_HEAP);
 
-	g_window = OS_WINDOW_Create((uint32_t)g_window_size.x, (uint32_t)g_window_size.y, "UI demo (DX11)");
+	g_window = OS_WINDOW_Create((uint32_t)g_window_size.x, (uint32_t)g_window_size.y, "Plant growth");
 	OS_WINDOW_SetFullscreen(&g_window, g_window_fullscreen);
 
 	D3D_FEATURE_LEVEL dx_feature_levels[] = { D3D_FEATURE_LEVEL_11_0 };
@@ -721,11 +589,11 @@ static void InitApp() {
 	UI_Init(&g_persist, &ui_backend);
 
 	// NOTE: the font data must remain alive across the whole program lifetime!
-	STR roboto_mono_ttf = ReadEntireFile(&g_persist, "../fire/fire_ui/resources/roboto_mono.ttf");
-	STR icons_ttf = ReadEntireFile(&g_persist, "../fire/fire_ui/resources/fontello/font/fontello.ttf");
+	STR_View roboto_mono_ttf = ReadEntireFile(&g_persist, "../fire/fire_ui/resources/roboto_mono.ttf");
+	STR_View icons_ttf = ReadEntireFile(&g_persist, "../fire/fire_ui/resources/fontello/font/fontello.ttf");
 
-	UI_FontInit(&g_base_font, roboto_mono_ttf.data, -4.f);
-	UI_FontInit(&g_icons_font, icons_ttf.data, -2.f);
+	g_base_font = UI_FontInit(roboto_mono_ttf.data, -4.f);
+	g_icons_font = UI_FontInit(icons_ttf.data, -2.f);
 
 	B3R_Init(g_dx11_device);
 }
@@ -733,8 +601,8 @@ static void InitApp() {
 static void DeinitApp() {
 	B3R_Deinit();
 
-	UI_FontDeinit(&g_base_font);
-	UI_FontDeinit(&g_icons_font);
+	UI_FontDeinit(g_base_font);
+	UI_FontDeinit(g_icons_font);
 
 	UI_Deinit();
 	UI_DX11_Deinit();
@@ -748,43 +616,32 @@ static void DeinitApp() {
 	DS_ArenaDeinit(&g_temp);
 }
 
-static void InitGridMesh(B3R_WireMesh* mesh) {
-	struct WireVertex {
-		HMM_Vec3 position;
-		UI_Color color;
-	};
-
-	UI_Color grid_color = UI_MakeColorF(169.f/255.f, 181.f/255.f, 185.f/255.f, 1.f);
+static void InitGrid(B3R_WireMesh* mesh, HMM_Vec3 origin, HMM_Vec3 x_step, HMM_Vec3 y_step, int grid_extent, UI_Color grid_color) {
 	UI_Color x_axis_color = UI_MakeColorF(1.f, 0.2f, 0.2f, 1.f);
 	UI_Color y_axis_color = UI_MakeColorF(0.15f, 1.f, 0.15f, 1.f);
 
+	struct WireVertex { HMM_Vec3 position; UI_Color color; };
 	DS_DynArray(WireVertex) wire_verts = {&g_temp};
-	int grid_extent = 25;
 
-	float cell_size = 0.1f;
-	HMM_Vec3 origin = {0, 0, 0};
-	HMM_Vec3 x_dir = {cell_size, 0, 0};
-	HMM_Vec3 y_dir = {0, cell_size, 0};
-
-	HMM_Vec3 x_origin_a = origin + y_dir * -(float)grid_extent;
-	HMM_Vec3 x_origin_b = origin + y_dir * (float)grid_extent;
+	HMM_Vec3 x_origin_a = origin + y_step * -(float)grid_extent;
+	HMM_Vec3 x_origin_b = origin + y_step * (float)grid_extent;
 
 	for (int x = -grid_extent; x <= grid_extent; x++) {
-		HMM_Vec3 x_offset = x_dir * (float)x;
+		HMM_Vec3 x_offset = x_step * (float)x;
 		DS_ArrPush(&wire_verts, {x_origin_a + x_offset, x == 0 ? y_axis_color : grid_color});
 		DS_ArrPush(&wire_verts, {x_origin_b + x_offset, x == 0 ? y_axis_color : grid_color});
 	}
 
-	HMM_Vec3 y_origin_a = origin + x_dir * -(float)grid_extent;
-	HMM_Vec3 y_origin_b = origin + x_dir * (float)grid_extent;
+	HMM_Vec3 y_origin_a = origin + x_step * -(float)grid_extent;
+	HMM_Vec3 y_origin_b = origin + x_step * (float)grid_extent;
 
 	for (int y = -grid_extent; y <= grid_extent; y++) {
-		HMM_Vec3 y_offset = y_dir * (float)y;
+		HMM_Vec3 y_offset = y_step * (float)y;
 		DS_ArrPush(&wire_verts, {y_origin_a + y_offset, y == 0 ? x_axis_color : grid_color});
 		DS_ArrPush(&wire_verts, {y_origin_b + y_offset, y == 0 ? x_axis_color : grid_color});
 	}
 
-	B3R_WireMeshInit(mesh, (B3R_WireVertex*)wire_verts.data, wire_verts.length);
+	B3R_WireMeshInit(mesh, (B3R_WireVertex*)wire_verts.data, wire_verts.count);
 }
 
 static void TextureInitFromFile(B3R_Texture* texture, const char* filepath) {
@@ -803,15 +660,12 @@ int main() {
 
 	DS_ArenaInit(&g_plant_arena, 256, DS_HEAP);
 
-	InitGridMesh(&g_grid_mesh);
+	InitGrid(&g_grid_mesh, {0, 0, 0}, {0.1f, 0, 0}, {0, 0.1f, 0}, 25, UI_MakeColorF(0.6f, 0.6f, 0.6f, 1.f));
 	
 	g_imported_mesh_leaf = ImportMesh(&g_persist, "../resources/leaf_with_morph_targets.glb");
 	g_imported_mesh_bud = ImportMesh(&g_persist, "../resources/bud.glb");
 	g_imported_mesh_unit_cube = ImportMesh(&g_persist, "../resources/unit_cube.glb");
 	
-	MeshInitFromFile(&g_mesh_skybox, "../resources/skysphere.glb");
-	//TextureInitFromFile(&g_texture_skybox, "../resources/skysphere_texture.png");
-
 	while (!OS_WINDOW_ShouldClose(&g_window)) {
 		DS_ArenaReset(&g_temp);
 
@@ -825,9 +679,6 @@ int main() {
 		UpdateAndRender();
 	}
 	
-	//B3R_TextureDeinit(&g_texture_skybox);
-	B3R_MeshDeinit(&g_mesh_skybox);
-
 	B3R_WireMeshDeinit(&g_grid_mesh);
 	DS_ArenaDeinit(&g_plant_arena);
 

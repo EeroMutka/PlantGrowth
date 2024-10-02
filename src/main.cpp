@@ -390,7 +390,7 @@ static void UI_CurveDeinit(UI_Curve* curve) {
 	DS_ArrDeinit(&curve->points);
 }
 
-static void UI_ValCurveDraw(UI_Box* box) {
+static void UI_PlugValCurve(UI_Box* box, UI_Curve* curve) {
 	// for drawing, we need the actual curve.
 	//UI_DrawRect(box->computed_rect, UI_PINK);
 	//UI_DrawBoxDefault(box);
@@ -403,9 +403,6 @@ static void UI_ValCurveDraw(UI_Box* box) {
 
 	UI_DrawRectLines(box->computed_rect, 2.f, UI_BLACK);
 
-	// TODO: fix this! Right now, this makes it so that the pointer must stay stable for the entire frame.
-	UI_Curve* curve = (UI_Curve*)box->draw_args_custom;
-	
 	if (UI_InputWasPressed(UI_Input_MouseLeft) && data->selected_point_num != 0) {
 		data->selected_point_num = 0;
 	}
@@ -483,15 +480,27 @@ static void UI_ValCurveDraw(UI_Box* box) {
 // IDEA: The curve UI could be used for arbitrary plotting and for example outputting profiling data!
 // And an animation curves editor.
 
+/*
 static void UI_AddValCurve(UI_Key key, UI_Curve* curve, UI_Size w, UI_Size h) {
 	UI_Box* box = UI_AddBox(key, w, h, UI_BoxFlag_DrawBorder);
-	box->draw = UI_ValCurveDraw;
-	box->draw_args_custom = curve;
+	//box->draw = UI_ValCurveDraw;
+	//box->draw_args_custom = curve;
 
 	// hmm... the curve pointer must stay valid for the entire frame.
 	// That sucks.
 	// I think the "fire-UI" way to deal with this is to use the prev frame rect for curve editing inputs.
-}
+
+	// is there some way I could make this easier? The biggest annoyance here is that I have to deep-clone all the data into the frame arena and do drawing separately from input handling.
+	// To solve this, we *need* the rect when calling this function. And usually, it is obtainable! Only with smart layout it isn't.
+	// New UI lib API idea: smart layouting
+
+	UI_Box* root = UI_BeginLayout();
+	UI_Box* my_box_1 = UI_AddBox(root, "flex", "none");
+	UI_Box* my_box_2 = UI_AddBox(root, "fit", "none");
+	UI_EndLayout(root);
+	
+	UI_PopulateBoxToCurve(my_box_1->rect)
+}*/
 
 // -------------------------------------------------------------------------
 
@@ -544,7 +553,7 @@ static void UpdateAndRender() {
 	apical_control_header->draw_args = UI_DrawBoxDefaultArgsInit();
 	apical_control_header->draw_args->transparent_bg_color = UI_BLACK;
 
-	UI_AddValCurve(UI_KEY(), &curve, UI_SizeFlex(1.f), 80.f);
+	UI_Box* curve_plug = UI_AddBox(UI_KEY(), UI_SizeFlex(1.f), 80.f, UI_BoxFlag_DrawBorder);
 	UI_AddBox(UI_KEY(), 0.f, 5.f, 0); // pad
 
 	/*
@@ -586,6 +595,11 @@ static void UpdateAndRender() {
 	}
 
 	UI_PopBox(root);
+	UI_BoxComputeRects(root, {20.f, 20.f});
+	UI_DrawBox(root);
+	
+	// Only after drawing the box we can do plugs
+	UI_PlugValCurve(curve_plug, &curve);
 
 	// plant simulation
 	{
@@ -610,8 +624,6 @@ static void UpdateAndRender() {
 //		RegeneratePlantMesh();
 //	}
 
-	UI_BoxComputeRects(root, {20.f, 20.f});
-	UI_DrawBox(root);
 
 	UI_Outputs ui_outputs;
 	UI_EndFrame(&ui_outputs);

@@ -1,8 +1,8 @@
 #include "Fire/fire_ds.h"
-
 #include "third_party/HandmadeMath.h"
 #include "utils/space_math.h"
 
+#include "curves.h"
 #include "plant_growth.h"
 
 // -- Constants ---------------------------------------------------------------
@@ -237,7 +237,6 @@ static void BudGrow(Plant* plant, DS_Arena* temp, Bud* bud, float vigor, const P
 		// 0 means all resources are given equally to all lateral buds, and nothing is given to the apical bud.
 		// 1 means all resources are given equally to all buds, including apical bud.
 
-		float apical_control = 1.f;
 		//if (bud->segments.count > 5)  apical_control = 0.5f;
 		
 		
@@ -246,7 +245,6 @@ static void BudGrow(Plant* plant, DS_Arena* temp, Bud* bud, float vigor, const P
 		
 		// so we might want to have a drop...
 
-		
 		// what if we have "apical control over bud distance?"
 
 		float stem_length = (float)bud->segments.count;
@@ -257,10 +255,9 @@ static void BudGrow(Plant* plant, DS_Arena* temp, Bud* bud, float vigor, const P
 		// Or we could add some value to "bud_dist".
 
 		// We can have two weights here, or even three!
-		// apical control over "time"
-		if (base_dist*0.f + stem_length*1.f + (float)bud->order*0.f > 30.f) {
-			apical_control = 0.1f;
-		}
+		// TODO: try apical control over literal time in the simulation?
+		float apical_control_x = (base_dist*params->ac_base_dist_factor + stem_length*params->ac_stem_length_factor + (float)bud->order*params->ac_order_factor) * params->ac_overall_factor;
+		float apical_control = CurveEvalAtX(params->apical_control_curve, apical_control_x);
 
 		/*if (bud->distance_from_root > 30.f) {
 			if (bud->segments.count > 5) {

@@ -31,5 +31,15 @@ https://docs.microsoft.com/en-us/visualstudio/debugger/create-custom-views-of-na
 			</ArrayItems>
 		</Expand>
 	</Type>
+	
+	<Type Name="DS_ArrayView_&lt;*&gt;">
+		<DisplayString>{{data={(void*)data}, count={count}}}</DisplayString>
+		<Expand>
+			<ArrayItems>
+			  <Size>count</Size>
+			  <ValuePointer>data</ValuePointer>
+			</ArrayItems>
+		</Expand>
+	</Type>
 
 </AutoVisualizer>

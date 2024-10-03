@@ -54,8 +54,14 @@ struct PlantParameters {
 	uint32_t random_seed = 1;
 
 	float max_age = 1000.f;
-	float vigor_scale = 0.05f;//0.005f;
+	float vigor_scale = 0.05f;
 
+	float ac_base_dist_factor = 1.f;
+	float ac_stem_length_factor = 1.f;
+	float ac_order_factor = 0.f;
+	float ac_overall_factor = 0.01f;
+	const Curve* apical_control_curve;
+	
 	// can we maybe have a curve graph of apical control over maturity?
 	//float apical_control = 1.f;
 	//int apical_control_maturity;

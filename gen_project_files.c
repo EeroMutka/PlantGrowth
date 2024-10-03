@@ -14,6 +14,9 @@ int main() {
 	BUILD_AddSourceFile(&plant_growth, "../src/main.cpp");
 	BUILD_AddSourceFile(&plant_growth, "../src/plant_growth.cpp");
 	
+	BUILD_AddVisualStudioNatvisFile(&plant_growth, "../fire/fire.natvis");
+	BUILD_AddVisualStudioNatvisFile(&plant_growth, "../fire/fire.natstepfilter");
+	
 	BUILD_Project* projects[] = {&plant_growth};
 	BUILD_CreateDirectory("build");
 	

@@ -7,7 +7,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{BF7DAE6A-813B-4792-B671-2377BE38DC49}</ProjectGuid>
+    <ProjectGuid>{383C8FF6-1461-4DC2-AA3E-F962CFF7234A}</ProjectGuid>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Custom|x64'" Label="Configuration">
@@ -50,6 +50,12 @@
       <AdditionalOptions>/IGNORE:4099 /DYNAMICBASE:NO </AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
+  <ItemGroup>
+    <None Include="../fire/fire.natvis" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="../fire/fire.natstepfilter" />
+  </ItemGroup>
   <ItemGroup>
     <ClCompile Include="../src/main.cpp" />
   </ItemGroup>

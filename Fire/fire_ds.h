@@ -497,16 +497,29 @@ static inline void* DS_CloneSizeA(DS_Arena* arena, const void* value, int size, 
 
 // -- Dynamic array --------------------------------
 
-#ifdef __cplusplus
+#ifndef __cplusplus // C-style dynamic array
+#define DS_DynArray(T) struct { DS_Allocator* allocator; T* data; int32_t count; int32_t capacity; }
+typedef DS_DynArray(void) DS_DynArrayRaw;
+#else
+// C++ style dynamic array
 template<class T> struct DS_DynArray_ {
 	DS_Allocator* allocator; T* data; int32_t count; int32_t capacity;
-	inline T& operator [](size_t i) { return (DS_ArrBoundsCheck((*this), i), data[i]); }
+	inline T& operator [](size_t i)       { return DS_ArrBoundsCheck((*this), i), data[i]; }
+	inline T operator [](size_t i) const  { return DS_ArrBoundsCheck((*this), i), data[i]; }
 };
 #define DS_DynArray(T) DS_DynArray_<T>
 typedef struct { DS_Allocator* allocator; void* data; int32_t count; int32_t capacity; } DS_DynArrayRaw;
-#else
-#define DS_DynArray(T) struct { DS_Allocator* allocator; T* data; int32_t count; int32_t capacity; }
-typedef DS_DynArray(void) DS_DynArrayRaw;
+
+// The only fire_ds feature that's only supported in C++: an array view. If you're using C, then an explicit pointer and a count is probably the way to go.
+template<class T> struct DS_ArrayView_ {
+	T* data; int32_t count;
+	DS_ArrayView_() : data(0), count(0) {}
+	DS_ArrayView_(T* _data, int32_t _count) : data(_data), count(_count) {}
+	DS_ArrayView_(const DS_DynArray_<T>& other) : data(other.data), count(other.count) {}
+	inline T& operator [](size_t i)       { return DS_ArrBoundsCheck((*this), i), data[i]; }
+	inline T operator [](size_t i) const  { return DS_ArrBoundsCheck((*this), i), data[i]; }
+};
+#define DS_ArrayView(T) DS_ArrayView_<T>
 #endif
 
 #define DS_ArrGet(ARR, INDEX)          (DS_ArrBoundsCheck(ARR, INDEX), ((ARR).data)[INDEX])

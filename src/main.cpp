@@ -57,6 +57,8 @@
 #define CAMERA_VIEW_SPACE_IS_POSITIVE_Y_DOWN
 #include "utils/camera.h"
 
+#include "curves.h"
+#include "ui_extras.h"
 #include "plant_growth.h"
 
 struct SimpleGPUMeshVertex {
@@ -102,6 +104,8 @@ static DS_Arena g_persist_arena;
 static DS_Arena g_temp_arena;
 
 static Camera g_camera;
+
+static Curve g_apical_control_curve;
 
 static PlantParameters g_plant_params = {};
 static DS_Arena g_plant_arena;
@@ -375,135 +379,6 @@ static void RegeneratePlantMesh() {
 	g_has_plant_mesh = true;
 }
 
-
-// -- Curves ---------------------------------------------------------------
-
-struct UI_Curve {
-	DS_DynArray(UI_Vec2) points; // for now, just support linear interpolation
-};
-
-static void UI_CurveInit(UI_Curve* curve, DS_Allocator* allocator) {
-	DS_ArrInit(&curve->points, allocator);
-}
-
-static void UI_CurveDeinit(UI_Curve* curve) {
-	DS_ArrDeinit(&curve->points);
-}
-
-static void UI_PlugValCurve(UI_Box* box, UI_Curve* curve) {
-	// for drawing, we need the actual curve.
-	//UI_DrawRect(box->computed_rect, UI_PINK);
-	//UI_DrawBoxDefault(box);
-
-	struct RetainedData {
-		int selected_point_num;
-	};
-	RetainedData* data;
-	UI_BoxGetRetainedVar(box, UI_KEY(), &data);
-
-	UI_DrawRectLines(box->computed_rect, 2.f, UI_BLACK);
-
-	if (UI_InputWasPressed(UI_Input_MouseLeft) && data->selected_point_num != 0) {
-		data->selected_point_num = 0;
-	}
-
-	if (UI_InputWasPressed(UI_Input_Delete) && data->selected_point_num && curve->points.count > 2) {
-		DS_ArrRemove(&curve->points, data->selected_point_num - 1);
-		data->selected_point_num = 0;
-	}
-
-	if (UI_DoubleClickedAnywhere() && UI_PointIsInRect(box->computed_rect, UI_STATE.mouse_pos)) {
-		for (int i = 0; i < curve->points.count; i++) {
-			UI_Vec2* curve_p = &curve->points[i];
-			float x = curve_p->x*(box->computed_rect.max.x - box->computed_rect.min.x) + box->computed_rect.min.x; // lerp
-			if (UI_STATE.mouse_pos.x < x) { // add before this point!
-				UI_Vec2 new_curve_p = {curve_p->x, 0.f};
-				DS_ArrInsert(&curve->points, i, new_curve_p);
-				data->selected_point_num = i + 1;
-				break;
-			}
-		}
-	}
-
-	UI_Vec2 prev_p = {0, 0};
-	float prev_curve_p_x = 0.f;
-	for (int i = 0; i < curve->points.count; i++) {
-		UI_Vec2* curve_p = &curve->points[i];
-
-		UI_Vec2 p = {
-			curve_p->x*(box->computed_rect.max.x - box->computed_rect.min.x) + box->computed_rect.min.x, // lerp
-			curve_p->y*(box->computed_rect.max.y - box->computed_rect.min.y) + box->computed_rect.min.y, // lerp
-		};
-		
-		bool is_hovered = false;
-		if (data->selected_point_num == 0) {
-			UI_Vec2 p_to_mouse = UI_SubV2(UI_STATE.mouse_pos, p);
-			is_hovered = p_to_mouse.x*p_to_mouse.x + p_to_mouse.y*p_to_mouse.y < 5.f*5.f;
-			if (is_hovered) {
-				if (UI_InputWasPressed(UI_Input_MouseLeft)) {
-					data->selected_point_num = i + 1;
-				}
-			}
-		}
-		
-		bool is_selected = data->selected_point_num == i + 1;
-		
-		if (is_selected && UI_InputIsDown(UI_Input_MouseLeft)) { // Dragging
-			p = UI_STATE.mouse_pos;
-			p.x = UI_Max(UI_Min(p.x, box->computed_rect.max.x), box->computed_rect.min.x);
-			p.y = UI_Max(UI_Min(p.y, box->computed_rect.max.y), box->computed_rect.min.y);
-
-			curve_p->x = (p.x - box->computed_rect.min.x) / (box->computed_rect.max.x - box->computed_rect.min.x); // inverse-lerp
-			curve_p->y = (p.y - box->computed_rect.min.y) / (box->computed_rect.max.y - box->computed_rect.min.y); // inverse-lerp
-		}
-
-		if (i == 0) curve_p->x = 0.f; // snap start to 0
-		if (i == curve->points.count - 1) curve_p->x = 1.f; // snap end to 1
-
-		if (curve_p->x < prev_curve_p_x) {
-			curve_p->x = prev_curve_p_x;
-		}
-		p.x = curve_p->x*(box->computed_rect.max.x - box->computed_rect.min.x) + box->computed_rect.min.x; // lerp
-
-		if (i > 0) {
-			UI_DrawLine(prev_p, p, 2.f, UI_LIME);
-		}
-
-		float r = is_hovered || is_selected ? 4.f : 3.f;
-		UI_DrawRect({UI_SubV2(p, UI_VEC2{r, r}), UI_AddV2(p, UI_VEC2{r, r})}, is_selected ? UI_WHITE : UI_LIME);
-		//UI_DrawCircle(p, r, 8, is_selected ? UI_WHITE : (is_hovered ? UI_LIGHTGRAY : UI_GRAY));
-		prev_p = p;
-		prev_curve_p_x = curve_p->x;
-	}
-}
-
-// IDEA: The curve UI could be used for arbitrary plotting and for example outputting profiling data!
-// And an animation curves editor.
-
-/*
-static void UI_AddValCurve(UI_Key key, UI_Curve* curve, UI_Size w, UI_Size h) {
-	UI_Box* box = UI_AddBox(key, w, h, UI_BoxFlag_DrawBorder);
-	//box->draw = UI_ValCurveDraw;
-	//box->draw_args_custom = curve;
-
-	// hmm... the curve pointer must stay valid for the entire frame.
-	// That sucks.
-	// I think the "fire-UI" way to deal with this is to use the prev frame rect for curve editing inputs.
-
-	// is there some way I could make this easier? The biggest annoyance here is that I have to deep-clone all the data into the frame arena and do drawing separately from input handling.
-	// To solve this, we *need* the rect when calling this function. And usually, it is obtainable! Only with smart layout it isn't.
-	// New UI lib API idea: smart layouting
-
-	UI_Box* root = UI_BeginLayout();
-	UI_Box* my_box_1 = UI_AddBox(root, "flex", "none");
-	UI_Box* my_box_2 = UI_AddBox(root, "fit", "none");
-	UI_EndLayout(root);
-	
-	UI_PopulateBoxToCurve(my_box_1->rect)
-}*/
-
-// -------------------------------------------------------------------------
-
 static void UpdateAndRender() {
 	Camera_Update(&g_camera, &g_inputs, 0.002f, 0.001f, 70.f, g_window_size.x / g_window_size.y, 0.01f, 1000.f);
 
@@ -522,23 +397,6 @@ static void UpdateAndRender() {
 	root->inner_padding = {12.f, 12.f};
 	UI_PushBox(root);
 
-	PlantParameters plant_params_old;
-	memcpy(&plant_params_old, &g_plant_params, sizeof(PlantParameters)); // use memcpy to copy any compiler-introduced padding bytes as well
-		
-	static UI_Curve curve;
-	{
-		static bool first_frame = true;
-		if (first_frame) {
-			UI_CurveInit(&curve, DS_HEAP);
-
-			DS_ArrPush(&curve.points, {0.f, 0.5f});
-			DS_ArrPush(&curve.points, {0.5f, 1.f});
-			DS_ArrPush(&curve.points, {1.f, 0.5f});
-
-			first_frame = false;
-		}
-	}
-
 	static bool wireframe = false;
 	UI_AddFmt(UI_KEY(), "Wireframe: %!b", &wireframe);
 	UI_AddBox(UI_KEY(), 0.f, 5.f, 0); // pad
@@ -547,14 +405,22 @@ static void UpdateAndRender() {
 	UI_AddFmt(UI_KEY(), "Max age: %!f", &g_plant_params.max_age);
 	UI_AddBox(UI_KEY(), 0.f, 5.f, 0); // pad
 	UI_AddFmt(UI_KEY(), "Vigor scale: %!f", &g_plant_params.vigor_scale);
+	
+	UI_AddBox(UI_KEY(), 0.f, 5.f, 0); // pad
 	UI_AddBox(UI_KEY(), 0.f, 5.f, 0); // pad
 
-	UI_Box* apical_control_header = UI_AddBoxWithText(UI_KEY(), UI_SizeFlex(1.f), UI_SizeFit(), UI_BoxFlag_DrawTransparentBackground, "Apical control curve");
+	UI_Box* apical_control_header = UI_AddBoxWithText(UI_KEY(), UI_SizeFlex(1.f), UI_SizeFit(), UI_BoxFlag_DrawTransparentBackground, "Apical control");
 	apical_control_header->draw_args = UI_DrawBoxDefaultArgsInit();
 	apical_control_header->draw_args->transparent_bg_color = UI_BLACK;
+	UI_AddFmt(UI_KEY(), "Base dist factor: %!f", &g_plant_params.ac_base_dist_factor);
+	UI_AddFmt(UI_KEY(), "Stem length factor: %!f", &g_plant_params.ac_stem_length_factor);
+	UI_AddFmt(UI_KEY(), "Order factor: %!f", &g_plant_params.ac_order_factor);
+	UI_AddFmt(UI_KEY(), "Overall factor: %!f", &g_plant_params.ac_overall_factor);
 
 	UI_Box* curve_plug = UI_AddBox(UI_KEY(), UI_SizeFlex(1.f), 80.f, UI_BoxFlag_DrawBorder);
 	UI_AddBox(UI_KEY(), 0.f, 5.f, 0); // pad
+	UI_AddBox(UI_KEY(), 0.f, 5.f, 0); // pad
+
 
 	/*
 	UI_AddFmt(UI_KEY(), "Age: %!f", &g_plant_params.age);
@@ -599,7 +465,8 @@ static void UpdateAndRender() {
 	UI_DrawBox(root);
 	
 	// Only after drawing the box we can do plugs
-	UI_PlugValCurve(curve_plug, &curve);
+	UI_PlugValCurve(curve_plug, &g_apical_control_curve);
+	g_plant_params.apical_control_curve = &g_apical_control_curve;
 
 	// plant simulation
 	{
@@ -802,9 +669,14 @@ static void TextureInitFromFile(B3R_Texture* texture, const char* filepath) {
 
 int main() {
 	InitApp();
-
+	
 	g_camera.pos.Y = -0.6f;
 	g_camera.pos.Z = 0.3f;
+	
+	UI_CurveInit(&g_apical_control_curve, &g_persist_arena);
+	DS_ArrPush(&g_apical_control_curve.points, {0.f, 0.5f});
+	DS_ArrPush(&g_apical_control_curve.points, {0.5f, 1.f});
+	DS_ArrPush(&g_apical_control_curve.points, {1.f, 0.5f});
 
 	DS_ArenaInit(&g_plant_arena, 256, DS_HEAP);
 

@@ -285,6 +285,7 @@ typedef enum UI_InputEvent {
 	UI_InputEvent_PressOrRepeat = 1 << 0,
 	UI_InputEvent_Press = 1 << 1,
 	UI_InputEvent_Release = 1 << 2,
+	UI_InputEvent_DoubleClick = 1 << 3,
 } UI_InputEvent;
 
 typedef struct UI_Backend {
@@ -371,9 +372,8 @@ typedef struct UI_State {
 	UI_Vec2 mouse_pos;
 	UI_Vec2 window_size;
 
-	UI_Vec2 last_released_mouse_pos;
-	UI_Vec2 last_pressed_mouse_pos;
-	UI_Vec2 mouse_travel_distance_after_press; // NOTE: holding alt/shift will modify the speed at which this value changes
+	UI_Vec2 last_released_mouse_pos; // Cleanup: remove from this struct
+	UI_Vec2 mouse_travel_distance_after_press; // NOTE: holding alt/shift will modify the speed at which this value changes. Cleanup: remove from this struct
 
 	UI_Key mouse_clicking_down_box;
 	UI_Key mouse_clicking_down_box_new;
@@ -460,6 +460,7 @@ UI_API inline bool UI_InputIsDown(UI_Input input) { return UI_STATE.input_is_dow
 UI_API inline bool UI_InputWasPressed(UI_Input input) { return UI_STATE.inputs.input_events[input] & UI_InputEvent_Press; }
 UI_API inline bool UI_InputWasPressedOrRepeated(UI_Input input) { return (UI_STATE.inputs.input_events[input] & UI_InputEvent_PressOrRepeat) != 0; }
 UI_API inline bool UI_InputWasReleased(UI_Input input) { return (UI_STATE.inputs.input_events[input] & UI_InputEvent_Release) != 0; }
+UI_API inline bool UI_DoubleClickedAnywhere(void) { return (UI_STATE.inputs.input_events[UI_Input_MouseLeft] & UI_InputEvent_DoubleClick) != 0; }
 
 UI_API inline DS_Arena* UI_FrameArena(void) { return &UI_STATE.frame_arena; }
 
@@ -586,11 +587,6 @@ UI_API void UI_BoxGetVarPtrData(UI_Box* box, UI_Key key, void** out_ptr, int siz
 UI_API bool UI_BoxGetRetainedVarData(UI_Box* box, UI_Key key, void** out_ptr, int size);
 
 UI_API bool UI_BoxIsAParentOf(UI_Box* box, UI_Box* child);
-
-UI_API bool UI_HasMovedMouseAfterPressed(void);
-
-UI_API bool UI_ClickedAnywhere(void);
-UI_API bool UI_DoubleClickedAnywhere(void);
 
 // These input functions can be called even before a box with the given key has been created.
 // You may, for example, implement a "close" button, which you can first ask if it has been pressed during this frame,
@@ -1739,16 +1735,6 @@ UI_API void UI_DrawBoxDefault(UI_Box* box) {
 	UI_ProfExit();
 }
 
-UI_API bool UI_HasMovedMouseAfterPressed(void) {
-	UI_Vec2 delta = UI_SubV2(UI_STATE.mouse_pos, UI_STATE.last_pressed_mouse_pos);
-	return delta.x * delta.x + delta.y * delta.y > 4.f;
-}
-
-UI_API bool UI_ClickedAnywhere(void) {
-	bool clicked = UI_InputWasReleased(UI_Input_MouseLeft) || UI_InputWasReleased(UI_Input_Enter);
-	return clicked;
-}
-
 UI_API bool UI_Pressed(UI_Key key) {
 	return UI_PressedEx(key, UI_Input_MouseLeft);
 }
@@ -1773,15 +1759,6 @@ UI_API bool UI_Clicked(UI_Key key) {
 	bool clicked = UI_IsClickingDownAndHovered(key) &&
 		(UI_InputWasReleased(UI_Input_MouseLeft) || (UI_STATE.selection_is_visible && UI_InputWasReleased(UI_Input_Enter)));
 	return clicked;
-}
-
-UI_API bool UI_DoubleClickedAnywhere(void) {
-	bool result = UI_InputWasPressed(UI_Input_MouseLeft);
-	if (result && UI_InputIsDown(UI_Input_Shift)) UI_TODO();
-
-	result = result && !UI_HasMovedMouseAfterPressed();
-	result = result && UI_STATE.time_since_pressed_lmb < 0.2f;
-	return result;
 }
 
 UI_API bool UI_DoubleClicked(UI_Key key) {
@@ -2440,7 +2417,6 @@ UI_API void UI_EndFrame(UI_Outputs* outputs) {
 		if (UI_InputIsDown(UI_Input_Alt)) scale /= 50.f;
 		if (UI_InputIsDown(UI_Input_Shift)) scale *= 50.f;
 		UI_STATE.mouse_travel_distance_after_press = UI_AddV2(UI_STATE.mouse_travel_distance_after_press, UI_MulV2F(delta, scale));
-		UI_STATE.last_pressed_mouse_pos = UI_STATE.mouse_pos;
 	}
 	else {
 		UI_STATE.last_released_mouse_pos = UI_STATE.mouse_pos;

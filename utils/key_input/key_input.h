@@ -149,15 +149,17 @@ typedef enum INPUT_Key {
 	INPUT_Key_COUNT,
 } INPUT_Key;
 
-typedef enum INPUT_EventKind {
+typedef uint8_t INPUT_EventKind;
+enum {
 	INPUT_EventKind_Press,
 	INPUT_EventKind_Repeat,
 	INPUT_EventKind_Release,
 	INPUT_EventKind_TextCharacter,
-} INPUT_EventKind;
+};
 
 typedef struct INPUT_Event {
 	INPUT_EventKind kind;
+	uint8_t mouse_click_index; // 0 for regular click, 1 for double-click, 2 for triple-click
 	union {
 		INPUT_Key key; // for Press, Repeat, Release events
 		unsigned int text_character; // unicode character for TextCharacter event
@@ -176,6 +178,8 @@ static inline bool INPUT_IsDown(const INPUT_Frame* input, INPUT_Key key);
 static inline bool INPUT_WentDown(const INPUT_Frame* input, INPUT_Key key);
 static inline bool INPUT_WentDownOrRepeat(const INPUT_Frame* input, INPUT_Key key);
 static inline bool INPUT_WentUp(const INPUT_Frame* input, INPUT_Key key);
+static inline bool INPUT_DoubleClicked(const INPUT_Frame* input);
+static inline bool INPUT_TripleClicked(const INPUT_Frame* input);
 
 // ---------------------------------------------------------------------------------
 
@@ -205,6 +209,22 @@ static inline bool INPUT_IsDown(const INPUT_Frame* input, INPUT_Key key) {
 	}
 	return input->key_is_down[key];
 };
+
+static inline bool INPUT_DoubleClicked(const INPUT_Frame* input) {
+	for (int i = 0; i < input->events_count; i++) {
+		if (input->events[i].kind == INPUT_EventKind_Press &&
+			input->events[i].mouse_click_index == 1) return true;
+	}
+	return false;
+}
+
+static inline bool INPUT_TripleClicked(const INPUT_Frame* input) {
+	for (int i = 0; i < input->events_count; i++) {
+		if (input->events[i].kind == INPUT_EventKind_Press &&
+			input->events[i].mouse_click_index == 2) return true;
+	}
+	return false;
+}
 
 static inline bool INPUT_WentDown(const INPUT_Frame* input, INPUT_Key key) {
 	if (INPUT_IsDown(input, key)) {

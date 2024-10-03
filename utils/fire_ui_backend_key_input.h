@@ -38,6 +38,9 @@ static void UI_INPUT_ApplyInputs(UI_Inputs* ui_inputs, INPUT_Frame* inputs) {
 			if (ui_input) {
 				if (event->kind == INPUT_EventKind_Press) {
 					ui_inputs->input_events[ui_input] |= UI_InputEvent_Press | UI_InputEvent_PressOrRepeat;
+					if (event->mouse_click_index > 0) {
+						ui_inputs->input_events[ui_input] |= UI_InputEvent_DoubleClick;
+					}
 				} else if (event->kind == INPUT_EventKind_Repeat) {
 					ui_inputs->input_events[ui_input] |= UI_InputEvent_PressOrRepeat;
 				} else {

@@ -27,6 +27,7 @@ static void INPUT_OS_AddEvent(INPUT_OS_Events* state, const OS_WINDOW_Event* eve
 		INPUT_Event input_event = {0};
 		input_event.kind = event->is_repeat ? INPUT_EventKind_Repeat : INPUT_EventKind_Press;
 		input_event.key = key;
+		input_event.mouse_click_index = event->mouse_click_index;
 		DS_ArrPush(&state->events, input_event);
 	}
 	if (event->kind == OS_WINDOW_EventKind_Release) {

@@ -206,6 +206,7 @@ typedef struct OS_WINDOW_Event {
 	OS_WINDOW_EventKind kind;
 	OS_WINDOW_Key key; // for Press and Release events
 	bool is_repeat; // for Press events
+	uint8_t mouse_click_index; // 0 by default. 1 for double-click, 2 for triple-click
 	uint32_t text_character; // Unicode character
 	float mouse_wheel; // for MouseWheel event; +1.0 means the wheel was rotated forward by one detent (scroll step)
 	float raw_mouse_input[2]; // for RawMouseInput event
@@ -320,7 +321,7 @@ static OS_WINDOW_Key OS_WINDOW_KeyFromVK(uint64_t vk, uint16_t scancode) {
 	return key;
 }
 
-static bool OS_WINDOW_AddKeyEvent(OS_WINDOW* window, OS_WINDOW_Event* event, OS_WINDOW_EventKind kind, bool is_repeat, OS_WINDOW_Key key) {
+static bool OS_WINDOW_AddKeyEvent(OS_WINDOW* window, OS_WINDOW_Event* event, OS_WINDOW_EventKind kind, bool is_repeat, uint8_t mouse_click_index, OS_WINDOW_Key key) {
 	bool press = kind == OS_WINDOW_EventKind_Press;
 
 	bool generate_event = false;
@@ -335,6 +336,7 @@ static bool OS_WINDOW_AddKeyEvent(OS_WINDOW* window, OS_WINDOW_Event* event, OS_
 		event->kind = kind;
 		event->key = key;
 		event->is_repeat = is_repeat;
+		event->mouse_click_index = mouse_click_index;
 		window->key_is_down[key] = press;
 	}
 
@@ -374,19 +376,25 @@ static int64_t OS_WINDOW_WindowProc(HWND hWnd, uint32_t uMsg, uint64_t wParam, i
 			if (is_extended_key) scancode |= 0xE000;
 
 			OS_WINDOW_Key key = OS_WINDOW_KeyFromVK(wParam, scancode);
-			passed->has_event = OS_WINDOW_AddKeyEvent(window, event, kind, is_repeat, key);
+			passed->has_event = OS_WINDOW_AddKeyEvent(window, event, kind, is_repeat, 0, key);
 
 			result = DefWindowProcW(hWnd, uMsg, wParam, lParam);
 		} break;
 
 		case WM_LBUTTONDOWN: // fallthrough
 		case WM_RBUTTONDOWN: // fallthrough
+		case WM_LBUTTONDBLCLK: // fallthrough
 		case WM_MBUTTONDOWN: {
 			OS_WINDOW_Key key = OS_WINDOW_Key_Invalid;
+			uint8_t mouse_click_index = 0;
 			if (uMsg == WM_LBUTTONDOWN) key = OS_WINDOW_Key_MouseLeft;
 			if (uMsg == WM_RBUTTONDOWN) key = OS_WINDOW_Key_MouseRight;
 			if (uMsg == WM_MBUTTONDOWN) key = OS_WINDOW_Key_MouseMiddle;
-			passed->has_event = OS_WINDOW_AddKeyEvent(window, event, OS_WINDOW_EventKind_Press, false, key);
+			if (uMsg == WM_LBUTTONDBLCLK) {
+				key = OS_WINDOW_Key_MouseLeft;
+				mouse_click_index = 1;
+			}
+			passed->has_event = OS_WINDOW_AddKeyEvent(window, event, OS_WINDOW_EventKind_Press, false, mouse_click_index, key);
 
 			SetCapture(hWnd);
 
@@ -399,7 +407,7 @@ static int64_t OS_WINDOW_WindowProc(HWND hWnd, uint32_t uMsg, uint64_t wParam, i
 			if (uMsg == WM_LBUTTONUP) key = OS_WINDOW_Key_MouseLeft;
 			if (uMsg == WM_RBUTTONUP) key = OS_WINDOW_Key_MouseRight;
 			if (uMsg == WM_MBUTTONUP) key = OS_WINDOW_Key_MouseMiddle;
-			passed->has_event = OS_WINDOW_AddKeyEvent(window, event, OS_WINDOW_EventKind_Release, false, key);
+			passed->has_event = OS_WINDOW_AddKeyEvent(window, event, OS_WINDOW_EventKind_Release, false, 0, key);
 
 			if (!window->key_is_down[OS_WINDOW_Key_MouseLeft] &&
 				!window->key_is_down[OS_WINDOW_Key_MouseRight] &&
@@ -473,7 +481,7 @@ static void OS_WINDOW_RegisterWindowClass() {
 
 	WNDCLASSEXW wnd_class = {0};
 	wnd_class.cbSize = sizeof(WNDCLASSEXW);
-	wnd_class.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC; // CS_OWNDC is required for OpenGL
+	wnd_class.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC | CS_DBLCLKS; // CS_OWNDC is required for OpenGL
 	wnd_class.lpfnWndProc = OS_WINDOW_WindowProc;
 	wnd_class.cbClsExtra = 0;
 	wnd_class.cbWndExtra = 0;

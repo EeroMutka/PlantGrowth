@@ -13,20 +13,31 @@ static void UI_PlugValCurve(UI_Box* box, Curve* curve) {
 	//UI_DrawBoxDefault(box);
 
 	struct RetainedData {
-		int selected_point_num;
+		DS_DynArray(bool) point_is_selected;
+		bool drag_box_is_active;
+		UI_Vec2 drag_box_start;
 	};
 	RetainedData* data;
 	UI_BoxGetRetainedVar(box, UI_KEY(), &data);
 
+	DS_ArrClone(&UI_STATE.frame_arena, &data->point_is_selected); // keep alive for the next frame
+	bool point_is_selected_default = false;
+	DS_ArrResize(&data->point_is_selected, point_is_selected_default, curve->points.count);
+
 	UI_DrawRectLines(box->computed_rect, 2.f, UI_BLACK);
 
-	if (UI_InputWasPressed(UI_Input_MouseLeft) && data->selected_point_num != 0) {
-		data->selected_point_num = 0;
+	if (UI_InputWasPressed(UI_Input_MouseLeft)) {
+		memset(data->point_is_selected.data, 0, data->point_is_selected.count);
 	}
 
-	if (UI_InputWasPressed(UI_Input_Delete) && data->selected_point_num && curve->points.count > 2) {
-		DS_ArrRemove(&curve->points, data->selected_point_num - 1);
-		data->selected_point_num = 0;
+	if (UI_InputWasPressed(UI_Input_Delete) && curve->points.count > 2) {
+		for (int i = 0; i < data->point_is_selected.count; i++) {
+			if (data->point_is_selected[i]) {
+				DS_ArrRemove(&curve->points, i);
+				DS_ArrRemove(&data->point_is_selected, i);
+				i--;
+			}
+		}
 	}
 
 	if (UI_DoubleClickedAnywhere() && UI_PointIsInRect(box->computed_rect, UI_STATE.mouse_pos)) {
@@ -39,6 +50,23 @@ static void UI_PlugValCurve(UI_Box* box, Curve* curve) {
 				data->selected_point_num = i + 1;
 				break;
 			}
+		}
+	}
+	else if (UI_InputWasPressed(UI_Input_MouseLeft) && UI_PointIsInRect(box->computed_rect, UI_STATE.mouse_pos)) {
+		data->drag_box_is_active = true;
+		data->drag_box_start = UI_STATE.mouse_pos;
+	}
+
+	if (data->drag_box_is_active) {
+		if (!UI_InputIsDown(UI_Input_MouseLeft)) {
+			data->drag_box_is_active = false;
+		}
+		if (data->drag_box_is_active) {
+			UI_Rect drag_box_rect = {
+				{UI_Min(data->drag_box_start.x, UI_STATE.mouse_pos.x), UI_Min(data->drag_box_start.y, UI_STATE.mouse_pos.y)},
+				{UI_Max(data->drag_box_start.x, UI_STATE.mouse_pos.x), UI_Max(data->drag_box_start.y, UI_STATE.mouse_pos.y)},
+			};
+			UI_DrawRect(drag_box_rect, UI_YELLOW);
 		}
 	}
 
